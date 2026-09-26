@@ -111,6 +111,8 @@ export function SprintScreen() {
   const [paused, setPaused] = useState(false);
   const [hint, setHint] = useState<{ wordIds: string[]; looseIds: string[] } | null>(null);
   const firstGame = useRef(false);
+  // Key of the hint last shown, so a rAF frame racing the re-render can't show it twice.
+  const lastHintKey = useRef("");
   const [exitKinds] = useState(() => new Map<string, ExitKind>());
   const boardRef = useRef<BoardHandle>(null);
   const startedAt = useRef(0);
@@ -167,6 +169,7 @@ export function SprintScreen() {
     typing.clear();
     // New players get a nudge if they're stuck in their very first round.
     firstGame.current = player.stats.gamesByMode.sprint === 0;
+    lastHintKey.current = "";
     setHint(null);
     setSelection(EMPTY_SELECTION);
     setFeedback(null);
@@ -191,7 +194,9 @@ export function SprintScreen() {
       game.tick(now);
       if (firstGame.current && !hinted && !game.isOver && game.idleMs(now) > HINT_AFTER_MS) {
         const h = game.hint();
-        if (h) {
+        const key = h ? [...h.wordIds, ...h.looseIds].join(",") : "";
+        if (h && key !== lastHintKey.current) {
+          lastHintKey.current = key;
           setHint(h);
           setFeedback({ id: ++counter.current, tone: "info", text: `Stuck? The glowing ${h.looseIds.length ? "pieces" : "words"} combine into a new word` });
         }
