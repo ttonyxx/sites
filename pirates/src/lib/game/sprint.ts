@@ -17,6 +17,7 @@ import { createRng, type Rng } from "../engine/rng";
 import type { MissedInput, RatingEvent } from "../progress/types";
 import { sprintTypeWeights, type PuzzleBank } from "./bank";
 import { IdGen, makeLoose, makeWord, removePieces, tilesForTarget, type Board, type Selection, type Tile } from "./board";
+import { boardAdjustment } from "./difficulty";
 import { findOpportunities, opportunityKey, type Opportunity } from "./opportunities";
 import { PENALIZED_REASONS, resolveSteal, type RejectReason, type StealPlan } from "./resolve";
 import { nextCombo, scoreSteal, SCORING, type ScoreBreakdown } from "./scoring";
@@ -412,9 +413,10 @@ export class SprintGame {
     return breakdown.total;
   }
 
-  /** Rating-scale difficulty of what the player just made, adjusted for a crowded board. */
+  /** Rating-scale difficulty of what the player just made, adjusted for a crowded, look-alike board. */
   private difficultyOf(plan: StealPlan): { difficulty: number; planted: boolean } {
-    const boardAdj = 8 * (this.board.words.length - 10);
+    const others = this.board.words.filter((w) => !plan.wordIds.includes(w.id)).map((w) => w.word);
+    const boardAdj = boardAdjustment(plan.word, this.board.words.length, others);
     for (const p of this.planted.values()) {
       const same = p.wordIds.length === plan.wordIds.length && p.wordIds.every((id) => plan.wordIds.includes(id)) && p.puzzle.loose === plan.loose;
       if (same) return { difficulty: p.puzzle.difficulty + boardAdj, planted: true };
