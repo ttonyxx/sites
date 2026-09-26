@@ -73,10 +73,15 @@ function isDegreeForm(w: string): boolean {
   return false;
 }
 
+/** Real words that nonetheless look odd sitting on a board (plurals of 2-letter words, etc.). */
+const ODD_ON_A_BOARD = new Set(
+  "hes ifs ins mas ohs pas pis ups qua sic chi cox sop ova thy nit sac ohm ugh huh pap gob lye yen yap fro cad din fen eon hew moron idiot".split(" "),
+);
+
 /** Words that look natural sitting on a Pirates board. */
 function isBoardWorthy(w: string): boolean {
   const t = tierOf(w);
-  if (lexicon.tier(w) === "x" || w.length < 3 || w.length > 8) return false;
+  if (lexicon.tier(w) === "x" || w.length < 3 || w.length > 8 || ODD_ON_A_BOARD.has(w)) return false;
   if (t < 3 || (t === 3 && w.length > 4)) return false;
   if (t < 5 && isDegreeForm(w)) return false;
   if (t < 5 && isInflection(w) && !isPlainPlural(w)) return false;
