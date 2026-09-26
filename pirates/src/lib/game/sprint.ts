@@ -122,6 +122,7 @@ const LETTER_BAG = Object.entries({
   n: 8, o: 11, p: 3, q: 2, r: 9, s: 6, t: 9, u: 6, v: 3, w: 3, x: 2, y: 3, z: 2,
 }).flatMap(([letter, n]) => Array<string>(n).fill(letter));
 const ALPHABET = "abcdefghijklmnopqrstuvwxyz";
+const OPENING_LETTERS = [..."eeeaaiioorrsstnld"];
 
 const MISS_MIN_AVAILABLE_MS = 3_000;
 const HELP_AFTER_MS = 15_000;
@@ -185,7 +186,8 @@ export class SprintGame {
 
     for (let i = 0; i < this.config.initialPlants; i++) this.plant(0, this.cursor - 60 * i);
     this.addDistractors(0, this.config.minWords + 1 - this.board.words.length);
-    for (let i = 0; i < 2; i++) this.addLoose(0, this.rng.pick(LETTER_BAG));
+    // Open with one friendly letter; the pool fills up as the round goes on.
+    this.addLoose(0, this.rng.pick(OPENING_LETTERS));
     this.refresh(0, "add");
     this.changed();
   }
@@ -610,11 +612,11 @@ export class SprintGame {
       planted: Boolean(plantedEntry),
       reason,
     });
-    // Only intended steals left alone for a while count against the rating.
-    if (plantedEntry && availableMs >= 8_000) {
-      this.ratingEvents.push({ skill: opp.sources.length === 1 ? "steals" : "fusion", difficulty, score: 0, weight: 0.5 });
-      this.ratingEvents.push({ skill: "boardScan", difficulty, score: 0, weight: 0.35 });
-      if (target.length >= 8) this.ratingEvents.push({ skill: "longWords", difficulty, score: 0, weight: 0.35 });
+    // Only intended steals left alone for a good while count against the rating, and lightly.
+    if (plantedEntry && availableMs >= 10_000) {
+      this.ratingEvents.push({ skill: opp.sources.length === 1 ? "steals" : "fusion", difficulty, score: 0, weight: 0.3 });
+      this.ratingEvents.push({ skill: "boardScan", difficulty, score: 0, weight: 0.2 });
+      if (target.length >= 8) this.ratingEvents.push({ skill: "longWords", difficulty, score: 0, weight: 0.2 });
     }
   }
 

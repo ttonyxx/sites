@@ -1,26 +1,244 @@
 @import "tailwindcss";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
+@theme {
+  --color-ink: #0b0b0c;
+  --color-ink-2: #111113;
+  --color-ink-3: #16161a;
+  --color-ink-4: #1d1d22;
+  --color-line: #232328;
+  --color-line-2: #303037;
+  --color-fg: #ededea;
+  --color-muted: #9b9ba1;
+  --color-faint: #62626a;
+  --color-accent: #f5b544;
+  --color-accent-2: #ffd07a;
+  --color-good: #5fd392;
+  --color-bad: #ff6b6b;
+  --color-tile: #f4ecd9;
+  --color-tile-ink: #1f1a13;
+
+  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo, monospace;
+  --font-tile: var(--font-nunito), ui-rounded, "Arial Rounded MT Bold", system-ui, sans-serif;
+
+  --ease-snap: cubic-bezier(0.2, 0.9, 0.25, 1.15);
+  --ease-out-quint: cubic-bezier(0.22, 1, 0.36, 1);
+
+  --animate-caret: caret 1.05s steps(1) infinite;
+  --animate-shimmer: shimmer 2.4s linear infinite;
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+@keyframes caret {
+  0%,
+  49% {
+    opacity: 1;
+  }
+  50%,
+  100% {
+    opacity: 0;
   }
 }
 
+@keyframes shimmer {
+  from {
+    background-position: -200% 0;
+  }
+  to {
+    background-position: 200% 0;
+  }
+}
+
+:root {
+  color-scheme: dark;
+}
+
+html,
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background-color: var(--color-ink);
+  color: var(--color-fg);
+}
+
+body {
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+  overflow-x: hidden;
+  /* A whisper of warm light from above, like a lamp over the table. */
+  background-image: radial-gradient(1100px 520px at 50% -140px, rgba(245, 181, 68, 0.07), transparent 70%);
+  background-repeat: no-repeat;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Film grain so the near-black never looks flat. */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 100;
+  opacity: 0.045;
+  mix-blend-mode: overlay;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+::selection {
+  background: rgba(245, 181, 68, 0.35);
+}
+
+:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 3px;
+  border-radius: 6px;
+}
+
+.tabular {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1, "zero" 0;
+}
+
+/* ─── Bananagrams-style letter tiles ──────────────────────────────────────── */
+
+@layer components {
+  .tile {
+    --t: 44px;
+    --face-1: #f8f1e1;
+    --face-2: #ece0c5;
+    --edge-1: #d8c7a0;
+    --edge-2: #bba57a;
+    --glyph: var(--color-tile-ink);
+    position: relative;
+    display: grid;
+    place-items: center;
+    flex: none;
+    width: var(--t);
+    height: var(--t);
+    border-radius: calc(var(--t) * 0.19);
+    font-family: var(--font-tile);
+    font-weight: 900;
+    font-size: calc(var(--t) * 0.6);
+    line-height: 1;
+    letter-spacing: 0;
+    color: var(--glyph);
+    text-transform: uppercase;
+    user-select: none;
+    -webkit-user-select: none;
+    background:
+      radial-gradient(120% 95% at 26% 10%, rgba(255, 253, 246, 0.95) 0%, rgba(255, 253, 246, 0) 58%),
+      linear-gradient(172deg, var(--face-1) 0%, var(--face-2) 100%);
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.9),
+      inset 0 -1.5px 0 rgba(130, 100, 50, 0.16),
+      0 1px 0 var(--edge-1),
+      0 calc(var(--t) * 0.07) 0 var(--edge-2),
+      0 calc(var(--t) * 0.1) calc(var(--t) * 0.16) -1px rgba(0, 0, 0, 0.5),
+      0 calc(var(--t) * 0.3) calc(var(--t) * 0.5) calc(var(--t) * -0.18) rgba(0, 0, 0, 0.55);
+    text-shadow: 0 1px 0 rgba(255, 255, 255, 0.6);
+    will-change: transform;
+  }
+
+  /* Printed glyph sits a touch high on real tiles. */
+  .tile > span {
+    transform: translateY(-3%);
+  }
+
+  .tile[data-selected="true"] {
+    --face-1: #ffecc0;
+    --face-2: #f6cf7c;
+    --edge-1: #e0b35c;
+    --edge-2: #c08a2e;
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.9),
+      inset 0 -1.5px 0 rgba(130, 80, 10, 0.2),
+      0 1px 0 var(--edge-1),
+      0 calc(var(--t) * 0.07) 0 var(--edge-2),
+      0 0 0 1.5px rgba(245, 181, 68, 0.9),
+      0 0 calc(var(--t) * 0.55) rgba(245, 181, 68, 0.35),
+      0 calc(var(--t) * 0.3) calc(var(--t) * 0.55) calc(var(--t) * -0.15) rgba(0, 0, 0, 0.6);
+  }
+
+  /* Loose letters in the pool: same material, cooler and matte, so they read as unclaimed. */
+  .tile[data-tone="pool"] {
+    --face-1: #efeadf;
+    --face-2: #ddd5c4;
+    --edge-1: #c9bfa9;
+    --edge-2: #a99d83;
+    --glyph: #2a261f;
+  }
+
+  .tile[data-tone="pool"][data-selected="true"] {
+    --face-1: #ffecc0;
+    --face-2: #f6cf7c;
+    --edge-1: #e0b35c;
+    --edge-2: #c08a2e;
+  }
+
+  /* Your stolen words glow faintly warm. */
+  .tile[data-tone="won"] {
+    --face-1: #fbf3de;
+    --face-2: #f0dfb8;
+  }
+
+  .tile[data-tone="good"] {
+    --face-1: #dff7e8;
+    --face-2: #b9e8cb;
+    --edge-1: #93cfa9;
+    --edge-2: #6fb08a;
+  }
+
+  .tile[data-tone="bad"] {
+    --face-1: #ffe1dc;
+    --face-2: #f6b9b0;
+    --edge-1: #e3978c;
+    --edge-2: #c2766b;
+  }
+
+  .tile[data-tone="ghost"] {
+    --face-1: #2a2a30;
+    --face-2: #202025;
+    --edge-1: #17171b;
+    --edge-2: #111114;
+    --glyph: #6c6c75;
+    text-shadow: none;
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.06),
+      0 calc(var(--t) * 0.07) 0 #121215;
+  }
+
+  /* Small tiles lose the heavy drop shadow so rows stay crisp. */
+  .tile[data-small="true"] {
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.85),
+      0 1px 0 var(--edge-1),
+      0 calc(var(--t) * 0.08) 0 var(--edge-2),
+      0 calc(var(--t) * 0.12) calc(var(--t) * 0.2) rgba(0, 0, 0, 0.45);
+  }
+
+  .panel {
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.025), rgba(255, 255, 255, 0.01));
+    border: 1px solid var(--color-line);
+    border-radius: 18px;
+  }
+
+  .hairline {
+    border-color: var(--color-line);
+  }
+
+  .label {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--color-faint);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }

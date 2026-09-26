@@ -7,6 +7,8 @@
 import { SKILLS, type RatingEvent, type SkillKey, type SkillRatings } from "./types";
 
 export const INITIAL_RATING = 1000;
+/** Sessions per skill before losses count in full. */
+export const PROVISIONAL_GAMES = 10;
 /** A session can't move one skill more than this, so one great/bad round doesn't dominate. */
 export const MAX_SESSION_DELTA = 80;
 
@@ -51,7 +53,9 @@ export function applyRatingEvents(ratings: SkillRatings, events: readonly Rating
       weights += w;
     }
     if (weights <= 0) continue;
-    const raw = (kFactor(current.games) * sum) / Math.sqrt(weights);
+    let raw = (kFactor(current.games) * sum) / Math.sqrt(weights);
+    // Provisional ratings fall gently: your first rounds are for learning the game.
+    if (raw < 0 && current.games < PROVISIONAL_GAMES) raw *= 0.6;
     const delta = Math.round(Math.max(-MAX_SESSION_DELTA, Math.min(MAX_SESSION_DELTA, raw)));
     const rating = Math.max(100, current.rating + delta);
     next[key] = { rating, games: current.games + 1, peak: Math.max(current.peak, rating) };
