@@ -1,0 +1,39 @@
+{
+  "name": "pirates",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "prebuild": "npm run data:verify",
+    "typecheck": "next typegen && tsc --noEmit",
+    "lint": "eslint",
+    "test": "vitest run",
+    "check": "npm run typecheck && npm run lint && npm run test",
+    "data:fetch": "tsx scripts/fetch-sources.ts",
+    "data:lexicon": "tsx scripts/build-lexicon.ts",
+    "data:puzzles": "tsx scripts/build-puzzles.ts",
+    "data:verify": "tsx scripts/verify-data.ts",
+    "data:all": "npm run data:lexicon && npm run data:puzzles && npm run data:verify"
+  },
+  "dependencies": {
+    "clsx": "^2.1.1",
+    "motion": "^13.4.4",
+    "next": "16.3.6",
+    "react": "19.2.8",
+    "react-dom": "19.2.8"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4",
+    "@types/node": "^24.19.0",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "eslint": "^9",
+    "eslint-config-next": "16.3.6",
+    "tailwindcss": "^4",
+    "tsx": "^4.23.15",
+    "typescript": "^5",
+    "vitest": "^5.0.2"
+  },
+  "description": "Pirates Blitz — an arcade trainer for the anagram-stealing word game Pirates."
+}

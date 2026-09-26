@@ -1,0 +1,162 @@
+/**
+ * The dictionary: which words are valid, how familiar each one is, and a
+ * signature index so "which words use exactly these letters?" is one lookup.
+ *
+ * Tiers are rough familiarity buckets derived from SCOWL size levels:
+ *   5 everyday · 4 common · 3 known · 2 less common · 1 uncommon · 0 obscure
+ *   "x" = valid if a player types it, but never used in puzzles (crude/offensive).
+ */
+import { getSignature, type Signature } from "./letters";
+
+export type Tier = 0 | 1 | 2 | 3 | 4 | 5;
+export type TierKey = Tier | "x";
+
+export const LEXICON_MIN_LENGTH = 3;
+export const LEXICON_MAX_LENGTH = 15;
+
+/** 0–1 familiarity score per tier. */
+export const TIER_FAMILIARITY: Record<TierKey, number> = { 5: 1, 4: 0.85, 3: 0.68, 2: 0.5, 1: 0.3, 0: 0.1, x: 0 };
+
+const TIER_ORDER: TierKey[] = [5, 4, 3, 2, 1, 0, "x"];
+
+export class Lexicon {
+  private readonly tiers: Map<string, TierKey>;
+  private readonly index: Map<Signature, string[]>;
+
+  private constructor(tiers: Map<string, TierKey>, index: Map<Signature, string[]>) {
+    this.tiers = tiers;
+    this.index = index;
+  }
+
+  /** Build synchronously (tests, scripts). */
+  static fromEntries(entries: Iterable<readonly [string, TierKey]>): Lexicon {
+    const tiers = new Map<string, TierKey>();
+    const index = new Map<Signature, string[]>();
+    for (const [word, tier] of entries) addEntry(tiers, index, word, tier);
+    return new Lexicon(tiers, index);
+  }
+
+  static fromText(text: string): Lexicon {
+    return Lexicon.fromEntries(parseLexicon(text));
+  }
+
+  /**
+   * Build without blocking the main thread for long: indexes in chunks and
+   * yields between them so animations keep running while the dictionary loads.
+   */
+  static async fromTextAsync(text: string, chunkSize = 12000): Promise<Lexicon> {
+    const tiers = new Map<string, TierKey>();
+    const index = new Map<Signature, string[]>();
+    let n = 0;
+    for (const [word, tier] of parseLexicon(text)) {
+      addEntry(tiers, index, word, tier);
+      if (++n % chunkSize === 0) await new Promise((r) => setTimeout(r, 0));
+    }
+    return new Lexicon(tiers, index);
+  }
+
+  get size(): number {
+    return this.tiers.size;
+  }
+
+  /** Is this a valid word (any tier, including "x")? */
+  has(word: string): boolean {
+    return this.tiers.has(word.toLowerCase());
+  }
+
+  tier(word: string): TierKey | undefined {
+    return this.tiers.get(word.toLowerCase());
+  }
+
+  /** 0–1; unknown words are 0. */
+  familiarity(word: string): number {
+    const t = this.tier(word);
+    return t === undefined ? 0 : TIER_FAMILIARITY[t];
+  }
+
+  /** Valid and allowed to appear in puzzles, with at least `minTier` familiarity. */
+  isPlayable(word: string, minTier: Tier = 0): boolean {
+    const t = this.tier(word);
+    return t !== undefined && t !== "x" && t >= minTier;
+  }
+
+  /** Every word spelled by exactly these letters. */
+  anagrams(signature: Signature): readonly string[] {
+    return this.index.get(signature) ?? EMPTY;
+  }
+
+  /** Words (any length) with the given tier, for building boards and racks. */
+  wordsWhere(predicate: (word: string, tier: TierKey) => boolean): string[] {
+    const out: string[] = [];
+    for (const [w, t] of this.tiers) if (predicate(w, t)) out.push(w);
+    return out;
+  }
+}
+
+const EMPTY: readonly string[] = Object.freeze([]);
+
+function addEntry(tiers: Map<string, TierKey>, index: Map<Signature, string[]>, word: string, tier: TierKey) {
+  if (tiers.has(word)) return;
+  tiers.set(word, tier);
+  const sig = getSignature(word);
+  const bucket = index.get(sig);
+  if (bucket) bucket.push(word);
+  else index.set(sig, [word]);
+}
+
+/**
+ * Text format (public/lexicon.txt), front-coded to keep the download small:
+ *   # comment lines
+ *   @5          ← following words are tier 5, sorted
+ *   0about      ← digit = letters shared with the previous word, then the rest
+ *   5ve         ← "above"
+ *   @x          ← valid, never used in puzzles
+ */
+export function* parseLexicon(text: string): Generator<[string, TierKey]> {
+  let tier: TierKey = 0;
+  let prev = "";
+  let start = 0;
+  while (start < text.length) {
+    let end = text.indexOf("\n", start);
+    if (end === -1) end = text.length;
+    let line = text.slice(start, end);
+    start = end + 1;
+    if (line.endsWith("\r")) line = line.slice(0, -1);
+    if (!line || line[0] === "#") continue;
+    if (line[0] === "@") {
+      const key = line.slice(1);
+      tier = key === "x" ? "x" : (Number(key) as Tier);
+      prev = "";
+      continue;
+    }
+    const shared = line.charCodeAt(0) - 48;
+    const word = shared >= 0 && shared <= 9 ? prev.slice(0, shared) + line.slice(1) : line;
+    prev = word;
+    yield [word, tier];
+  }
+}
+
+export function serializeLexicon(entries: Map<string, TierKey>): string {
+  const byTier = new Map<TierKey, string[]>(TIER_ORDER.map((t) => [t, []]));
+  for (const [w, t] of entries) byTier.get(t)!.push(w);
+  const lines = [
+    "# Pirates Blitz lexicon — generated by scripts/build-lexicon.ts; do not edit by hand.",
+    "# Validity: ENABLE (public domain) + common SCOWL words. Familiarity: SCOWL size levels",
+    "# (© Kevin Atkinson, see data/SOURCES.md). @5 = everyday … @0 = obscure; @x = never in puzzles.",
+    "# Front-coded: each line is <letters shared with previous word (0-9)><remaining letters>.",
+  ];
+  for (const t of TIER_ORDER) {
+    const words = byTier.get(t)!.sort();
+    if (!words.length) continue;
+    lines.push(`@${t}`);
+    let prev = "";
+    for (const w of words) {
+      let k = 0;
+      const max = Math.min(9, prev.length, w.length);
+      while (k < max && prev[k] === w[k]) k++;
+      lines.push(k + w.slice(k));
+      prev = w;
+    }
+  }
+  return lines.join("\n") + "\n";
+}
