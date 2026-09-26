@@ -47,22 +47,26 @@ function exitFor(kind: ExitKind | undefined) {
   return { opacity: 0, scale: 0.6, rotateY: 90, transition: { duration: 0.3 } };
 }
 
+// popLayout needs a ref on each child to lift exiting tiles out of the flow.
 const PoolTile = memo(function PoolTile({
   letter,
   tile,
   selected,
   onToggle,
   hinted,
+  ref,
 }: {
   letter: LooseLetter;
   tile: number;
   selected: boolean;
   onToggle: (kind: "word" | "loose", id: string) => void;
   hinted?: boolean;
+  ref?: React.Ref<HTMLButtonElement>;
 }) {
   const variants = useMemo<Variants>(() => ({ exit: (kinds?: ExitKinds) => exitFor(kinds?.get(letter.id)) }), [letter.id]);
   return (
     <motion.button
+      ref={ref}
       layout
       type="button"
       onPointerDown={(e) => e.preventDefault()}
