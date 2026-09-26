@@ -1,0 +1,19 @@
+# build output
+_site/
+node_modules/
+.next/
+out/
+dist/
+*.tsbuildinfo
+next-env.d.ts
+
+# local env / tooling
+.env*
+!.env.example
+.DS_Store
+*.log
+.vercel
+coverage/
+
+# Claude Code worktrees
+.claude/worktrees/
