@@ -40,6 +40,8 @@ export function HomeScreen() {
 
   const onKey = useEffectEvent((e: KeyboardEvent) => {
     if (e.metaKey || e.ctrlKey || e.altKey) return;
+    // Enter on a focused link or button belongs to that element.
+    if ((e.target as HTMLElement | null)?.closest("a, button, input, textarea")) return;
     if (e.key === "Enter") router.push("/play/sprint");
   });
   useEffect(() => {

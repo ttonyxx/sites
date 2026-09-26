@@ -11,7 +11,7 @@ import { randomSeed } from "@/lib/engine/rng";
 import { EMPTY_SELECTION, pruneSelection, selectionLength, toggleSelection, type Selection } from "@/lib/game/board";
 import type { RejectReason } from "@/lib/game/resolve";
 import { SCORING } from "@/lib/game/scoring";
-import { SprintGame, type SprintEvent, type SprintResult } from "@/lib/game/sprint";
+import { SPRINT_MISSES_SAVED, SprintGame, type SprintEvent, type SprintResult } from "@/lib/game/sprint";
 import type { SessionReport } from "@/lib/progress/player";
 import type { PlayerData, SessionResult } from "@/lib/progress/types";
 import { setSoundEnabled, sfx } from "@/lib/sound";
@@ -58,7 +58,7 @@ function toSession(result: SprintResult, startedAt: number): SessionResult {
     triples: result.triples,
     ratingEvents: result.ratingEvents,
     // The most instructive few go to Review Mistakes.
-    missed: result.missed.slice(0, 4).map((m) => ({
+    missed: result.missed.slice(0, SPRINT_MISSES_SAVED).map((m) => ({
       id: m.id,
       type: m.type,
       sources: m.sources,
@@ -179,6 +179,10 @@ export function SprintScreen() {
     setGame(g);
     startedAt.current = Date.now();
     g.start(performance.now());
+    // The countdown runs on timers, which keep firing in a background tab: a round
+    // that begins while hidden starts paused.
+    if (document.hidden) g.pause(performance.now());
+    setPaused(document.hidden);
     setPhase("playing");
   };
 
@@ -238,7 +242,9 @@ export function SprintScreen() {
       }
       case "reject": {
         setFeedback({ id, tone: e.penaltyMs ? "bad" : "info", text: rejectMessage(e.reason, e.word, e.penaltyMs, e.diff) });
-        typing.markStale();
+        // A wrong answer goes stale (next letter starts fresh, Enter won't resubmit it);
+        // a harmless one (too short, needs rearranging) stays editable.
+        if (e.penaltyMs) typing.markStale();
         if (e.penaltyMs) {
           setPenaltyId(id);
           sfx.wrong();
@@ -274,7 +280,7 @@ export function SprintScreen() {
   useEffect(() => {
     if (!game) return;
     const onVisibility = () => {
-      if (document.hidden && !game.isOver) {
+      if (document.hidden && !game.isOver && !game.isPaused) {
         game.pause(performance.now());
         setPaused(true);
       }

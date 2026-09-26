@@ -216,6 +216,13 @@ describe("applySession", () => {
     expect(report.newAchievements).not.toContain("first-blood");
   });
 
+  it("only awards ON FIRE for Sprint combos", () => {
+    const fusion = applySession(createPlayer(0), sprintResult({ mode: "fusion", bestCombo: 12 }), 1000, "2026-09-26");
+    expect(fusion.report.newAchievements).not.toContain("on-fire");
+    const sprint = applySession(createPlayer(0), sprintResult({ bestCombo: 10 }), 1000, "2026-09-26");
+    expect(sprint.report.newAchievements).toContain("on-fire");
+  });
+
   it("has a definition for every achievement", () => {
     for (const a of ACHIEVEMENTS) expect(achievementById(a.id).title).toBeTruthy();
   });

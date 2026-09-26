@@ -56,7 +56,8 @@ export function AnagramScreen() {
   const [found, setFound] = useState<FoundWord[]>([]);
   const [feedback, setFeedback] = useState<Feedback>(null);
   const [generation, setGeneration] = useState(0);
-  const [endsAt, setEndsAt] = useState(0);
+  // A ref, not state: a hidden-tab shift must land before the next animation frame reads it.
+  const endsAt = useRef(0);
   const [final, setFinal] = useState<{ report: SessionReport; rack: Rack; found: FoundWord[]; wrong: number } | null>(null);
   const wrong = useRef(0);
   // rAF can fire again before React re-renders; commit each round exactly once.
@@ -136,7 +137,7 @@ export function AnagramScreen() {
 
   const onCountdownDone = () => {
     startedAt.current = Date.now();
-    setEndsAt(performance.now() + RAW_DURATION_MS);
+    endsAt.current = performance.now() + RAW_DURATION_MS;
     setPhase("playing");
   };
 
@@ -168,11 +169,13 @@ export function AnagramScreen() {
   };
 
   useAnimationFrame((now) => {
-    if (now >= endsAt) finish();
+    if (now >= endsAt.current) finish();
   }, phase === "playing");
 
   // A hidden tab doesn't run the rack's clock down.
-  useHiddenTime((ms) => setEndsAt((e) => e + ms), phase === "playing");
+  useHiddenTime((ms) => {
+    endsAt.current += ms;
+  }, phase === "playing");
 
   const clickTile = (idx: number) => {
     if (!rack || used.has(idx)) return;
@@ -231,7 +234,7 @@ export function AnagramScreen() {
             <Icon name="x" size={18} />
           </Link>
           <SoundToggle />
-          <Timer getRemaining={() => (phase === "playing" ? Math.max(0, endsAt - performance.now()) : RAW_DURATION_MS)} total={RAW_DURATION_MS} running={phase === "playing"} />
+          <Timer getRemaining={() => (phase === "playing" ? Math.max(0, endsAt.current - performance.now()) : RAW_DURATION_MS)} total={RAW_DURATION_MS} running={phase === "playing"} />
         </div>
         <div className="flex flex-col items-center gap-1.5">
           <span className="label">Words</span>

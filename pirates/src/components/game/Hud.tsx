@@ -1,7 +1,7 @@
 "use client";
 import clsx from "clsx";
 import { AnimatePresence, motion } from "motion/react";
-import { useRef } from "react";
+import { useEffect, useRef } from "react";
 import { useAnimationFrame } from "@/hooks/useAnimationFrame";
 import { pop } from "@/lib/motion";
 import { AnimatedNumber } from "../ui/AnimatedNumber";
@@ -75,6 +75,10 @@ export function ComboMeter({ combo, getFraction, running }: { combo: number; get
   useAnimationFrame(() => {
     if (barRef.current) barRef.current.style.transform = `scaleX(${getFraction()})`;
   }, running && combo >= 1);
+  // The frame loop stops when the chain breaks; empty the bar rather than freezing it mid-drain.
+  useEffect(() => {
+    if (combo < 1 && barRef.current) barRef.current.style.transform = "scaleX(0)";
+  }, [combo]);
 
   const hot = combo >= 5;
   const blazing = combo >= 10;

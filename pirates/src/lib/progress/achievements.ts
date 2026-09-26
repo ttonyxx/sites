@@ -54,7 +54,7 @@ export const ACHIEVEMENTS: AchievementDef[] = [
     title: "On Fire",
     description: "Get a 10× combo",
     icon: "flame",
-    check: ({ result }) => result.bestCombo >= 10,
+    check: ({ result }) => result.mode === "sprint" && result.bestCombo >= 10,
   },
   {
     id: "century",
