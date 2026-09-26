@@ -46,7 +46,8 @@ export function ModeIntro({ title, tagline, rules, demo, compact, ready, onStart
       <motion.div className="mt-10 flex flex-col items-center text-center" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={soft}>
         <div className="flex flex-wrap justify-center gap-3">
           {title.map((w, i) => (
-            <TileWord key={w} word={w} size={compact ? 34 : 40} entrance delay={i * 0.2} jitter />
+            // Long words shrink on tiny screens so the title never overflows.
+            <TileWord key={w} word={w} size={w.length >= 8 ? (compact ? 30 : 32) : compact ? 34 : 40} entrance delay={i * 0.2} jitter />
           ))}
         </div>
         <p className="mt-5 max-w-md text-muted">{tagline}</p>

@@ -99,19 +99,21 @@ export function SprintResults({ result, report, onPlayAgain }: { result: SprintR
         <MissedList missed={shown} delay={0.6} />
       </section>
 
-      <Reveal delay={0.7} className="sticky bottom-0 -mx-4 mt-2 flex flex-col items-center gap-3 bg-gradient-to-t from-ink via-ink/95 to-transparent px-4 pb-6 pt-8 sm:flex-row sm:justify-center">
+      <Reveal delay={0.7} className="sticky bottom-0 -mx-4 mt-2 flex flex-col items-center gap-2 bg-gradient-to-t from-ink via-ink/95 to-transparent px-4 pb-4 pt-6 sm:flex-row sm:justify-center sm:gap-3 sm:pb-6 sm:pt-8">
         <Button variant="primary" className="h-12 w-full text-base sm:w-auto sm:min-w-[200px]" onClick={onPlayAgain}>
           <Icon name="refresh" size={17} /> Play again
-          <Kbd className="ml-1 border-ink/20 bg-ink/10 text-ink/70 shadow-none">
+          <Kbd className="ml-1 hidden border-ink/20 bg-ink/10 text-ink/70 shadow-none sm:inline-grid">
             <Icon name="enter" size={12} strokeWidth={2.2} />
           </Kbd>
         </Button>
-        <ButtonLink href="/review" className="h-12 w-full sm:w-auto" aria-disabled={reviewCount === 0}>
-          Review mistakes{reviewCount > 0 && <span className="tabular rounded-md bg-accent/15 px-1.5 font-mono text-xs text-accent">{reviewCount}</span>}
-        </ButtonLink>
-        <ButtonLink href="/" variant="ghost" className="h-12">
-          Home
-        </ButtonLink>
+        <div className="flex w-full gap-2 sm:w-auto sm:gap-3">
+          <ButtonLink href="/review" className="h-11 flex-1 sm:h-12 sm:flex-none" aria-disabled={reviewCount === 0}>
+            Review mistakes{reviewCount > 0 && <span className="tabular rounded-md bg-accent/15 px-1.5 font-mono text-xs text-accent">{reviewCount}</span>}
+          </ButtonLink>
+          <ButtonLink href="/" variant="ghost" className="h-11 flex-1 sm:h-12 sm:flex-none">
+            Home
+          </ButtonLink>
+        </div>
       </Reveal>
     </main>
   );

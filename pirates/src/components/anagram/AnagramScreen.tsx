@@ -4,6 +4,7 @@ import { AnimatePresence, LayoutGroup, motion, useAnimationControls } from "moti
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useAnimationFrame } from "@/hooks/useAnimationFrame";
+import { useHiddenTime } from "@/hooks/useHiddenTime";
 import { useIsTouch, useMediaQuery } from "@/hooks/useMediaQuery";
 import { useTyping } from "@/hooks/useTyping";
 import { useGameData, type GameData } from "@/lib/data";
@@ -166,6 +167,9 @@ export function AnagramScreen() {
     if (now >= endsAt) finish();
   }, phase === "playing");
 
+  // A hidden tab doesn't run the rack's clock down.
+  useHiddenTime((ms) => setEndsAt((e) => e + ms), phase === "playing");
+
   const clickTile = (idx: number) => {
     if (!rack || used.has(idx)) return;
     typing.type(rack.letters[idx]);
@@ -227,11 +231,16 @@ export function AnagramScreen() {
         </div>
         <div className="flex flex-col items-center gap-1.5">
           <span className="label">Words</span>
-          <span className="tabular font-mono text-[26px] font-medium leading-none sm:text-[30px]">{found.length}</span>
+          <span className="tabular font-mono text-[22px] font-medium leading-none min-[380px]:text-[26px] sm:text-[30px]">{found.length}</span>
         </div>
-        <div className="flex min-w-[88px] flex-col items-end gap-1.5">
+        <div className="flex min-w-[64px] flex-col items-end gap-1.5 sm:min-w-[88px]">
           <span className="label">Score</span>
-          <AnimatedNumber value={score} className="tabular font-mono text-[26px] font-medium leading-none sm:text-[30px]" stiffness={170} damping={26} />
+          <AnimatedNumber
+            value={score}
+            className="tabular font-mono text-[22px] font-medium leading-none min-[380px]:text-[26px] sm:text-[30px]"
+            stiffness={170}
+            damping={26}
+          />
         </div>
       </header>
 

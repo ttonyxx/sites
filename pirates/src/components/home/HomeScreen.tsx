@@ -19,7 +19,7 @@ import { AnimatedNumber } from "../ui/AnimatedNumber";
 import { Icon, type IconName } from "../ui/Icon";
 import { Kbd } from "../ui/Kbd";
 import { AnagramHero } from "./AnagramHero";
-import { SkillBars, Sparkline } from "./Charts";
+import { FluidSparkline, SkillBars } from "./Charts";
 
 const item = (delay: number) => ({
   initial: { opacity: 0, y: 16 },
@@ -126,9 +126,7 @@ export function HomeScreen() {
                 {player && player.stats.gamesPlayed > 0 ? `${player.stats.gamesPlayed} session${player.stats.gamesPlayed === 1 ? "" : "s"} played` : "Play a round to calibrate"}
               </span>
             </div>
-            <div className="text-accent">
-              <Sparkline values={history} width={small ? 110 : 170} height={44} />
-            </div>
+            <FluidSparkline values={history} height={44} className="w-[110px] shrink-0 text-accent sm:w-[170px]" />
           </motion.div>
         </div>
 

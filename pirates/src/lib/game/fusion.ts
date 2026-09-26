@@ -153,6 +153,11 @@ export class FusionSession {
     return now - this.roundStart;
   }
 
+  /** Don't count time the player wasn't looking (tab hidden). */
+  pauseFor(ms: number): void {
+    this.roundStart += ms;
+  }
+
   submit(input: string, selection: Selection, now: number): FusionSubmit {
     const round = this.round;
     if (!round) return { ok: false, reason: "no-match", word: input };
