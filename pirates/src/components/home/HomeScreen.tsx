@@ -214,11 +214,11 @@ function ModeCard({ href, icon, title, blurb, badge }: { href: string; icon: Ico
 /** A few tiles drifting in the corner of the Sprint card. */
 function SprintCardDecor() {
   const tiles = [
-    { l: "s", x: "70%", y: 92, r: -8, d: 0 },
-    { l: "t", x: "77%", y: 70, r: 6, d: 0.4 },
-    { l: "e", x: "84%", y: 96, r: 12, d: 0.8 },
-    { l: "a", x: "88%", y: 58, r: -5, d: 1.2 },
-    { l: "l", x: "92%", y: 118, r: 9, d: 1.6 },
+    { l: "s", x: "70%", y: 80, r: -8, d: 0 },
+    { l: "t", x: "77%", y: 60, r: 6, d: 0.4 },
+    { l: "e", x: "84%", y: 84, r: 12, d: 0.8 },
+    { l: "a", x: "88%", y: 54, r: -5, d: 1.2 },
+    { l: "l", x: "92%", y: 100, r: 9, d: 1.6 },
   ];
   return (
     <div className="pointer-events-none absolute inset-0 hidden sm:block" aria-hidden>
