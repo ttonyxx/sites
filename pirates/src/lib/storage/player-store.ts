@@ -9,6 +9,7 @@
  */
 import { useSyncExternalStore } from "react";
 import { applySession, type SessionReport } from "../progress/player";
+import { recordReview, type ReviewOutcome } from "../progress/review";
 import type { PlayerData, PlayerSettings, SessionResult } from "../progress/types";
 import { browserStore } from "./kv";
 import { createLocalPlayerRepository, type PlayerRepository } from "./player-repository";
@@ -60,6 +61,11 @@ export const playerStore = {
     const { player, report } = applySession(ensureLoaded(), result);
     set(player);
     return report;
+  },
+  /** Save one review card's outcome right away, so quitting mid-review loses nothing. */
+  recordReviewCard(id: string, outcome: ReviewOutcome) {
+    const p = ensureLoaded();
+    set({ ...p, missed: recordReview(p.missed, id, outcome, Date.now()) });
   },
   updateSettings(patch: Partial<PlayerSettings>) {
     const p = ensureLoaded();

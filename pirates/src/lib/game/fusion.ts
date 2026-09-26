@@ -7,8 +7,11 @@ import { combineSignatures, getSignature } from "../engine/letters";
 import type { Lexicon } from "../engine/lexicon";
 import { isTrivialSteal, type Puzzle } from "../engine/puzzles";
 import type { Rng } from "../engine/rng";
+import type { RatingEvent } from "../progress/types";
 import type { PuzzleBank } from "./bank";
-import { IdGen, makeWord, type Board } from "./board";
+import { IdGen, makeWord, type Board, type Selection } from "./board";
+import { PENALIZED_REASONS, resolveSteal, type RejectReason } from "./resolve";
+import { fusionScore } from "./scoring";
 
 export const FUSION_SESSION_LENGTH = 10;
 export const FUSION_TIME_LIMIT_MS = 30_000;
@@ -68,4 +71,154 @@ export function buildFusionRound(
     return { puzzle, board: { words: boardWords, loose: [] }, answerWordIds: [a.id, b.id] };
   }
   return null;
+}
+
+// ── Session ──────────────────────────────────────────────────────────────────
+
+export interface FusionOutcome {
+  puzzle: Puzzle;
+  solved: boolean;
+  /** What the player typed when they solved it (may be another valid fusion). */
+  answer: string | null;
+  solveMs: number | null;
+  wrong: number;
+  points: number;
+  boardSize: number;
+}
+
+export type FusionSubmit =
+  | { ok: true; word: string; points: number; solveMs: number; wordIds: string[] }
+  | { ok: false; reason: RejectReason | "needs-two-words"; word: string; diff?: { missing: string; extra: string } };
+
+/**
+ * Ten Fusion Vision boards in a row. Pure state machine; the UI drives time.
+ */
+export class FusionSession {
+  readonly length: number;
+  private readonly bank: PuzzleBank;
+  private readonly lexicon: Lexicon;
+  private readonly rng: Rng;
+  private readonly ids = new IdGen("f");
+  private readonly used = new Set<string>();
+  private rating: number;
+  private round: FusionRound | null = null;
+  private roundStart = 0;
+  private wrongThisRound = 0;
+  readonly outcomes: FusionOutcome[] = [];
+  streak = 0;
+  bestStreak = 0;
+  score = 0;
+
+  constructor(bank: PuzzleBank, lexicon: Lexicon, rng: Rng, opts: { rating: number; length?: number; wordCount?: number }) {
+    this.bank = bank;
+    this.lexicon = lexicon;
+    this.rng = rng;
+    this.rating = opts.rating;
+    this.length = opts.length ?? FUSION_SESSION_LENGTH;
+    this.wordCount = opts.wordCount ?? 10;
+  }
+
+  private readonly wordCount: number;
+
+  get current(): FusionRound | null {
+    return this.round;
+  }
+
+  get index(): number {
+    return this.outcomes.length;
+  }
+
+  get done(): boolean {
+    return this.outcomes.length >= this.length;
+  }
+
+  /** Deal the next board. */
+  next(now: number): FusionRound | null {
+    if (this.done) return null;
+    const round = buildFusionRound(this.bank, this.lexicon, this.rng, {
+      rating: this.rating,
+      used: this.used,
+      wordCount: this.wordCount,
+      ids: this.ids,
+    });
+    if (!round) return null;
+    this.used.add(round.puzzle.id);
+    this.round = round;
+    this.roundStart = now;
+    this.wrongThisRound = 0;
+    return round;
+  }
+
+  elapsed(now: number): number {
+    return now - this.roundStart;
+  }
+
+  submit(input: string, selection: Selection, now: number): FusionSubmit {
+    const round = this.round;
+    if (!round) return { ok: false, reason: "no-match", word: input };
+    const res = resolveSteal(round.board, input, selection, { isWord: (w) => this.lexicon.has(w), maxWords: 2 });
+    if (!res.ok) {
+      if (PENALIZED_REASONS.has(res.reason)) this.wrongThisRound++;
+      return res;
+    }
+    if (res.plan.sources.length !== 2) {
+      this.wrongThisRound++;
+      return { ok: false, reason: "needs-two-words", word: res.plan.word };
+    }
+    const solveMs = Math.max(300, now - this.roundStart);
+    const points = fusionScore(res.plan.word.length, solveMs, round.puzzle.difficulty);
+    this.finishRound({ solved: true, answer: res.plan.word, solveMs, points });
+    return { ok: true, word: res.plan.word, points, solveMs, wordIds: res.plan.wordIds };
+  }
+
+  /** Time ran out or the player gave up. */
+  giveUp(): FusionOutcome | null {
+    if (!this.round) return null;
+    return this.finishRound({ solved: false, answer: null, solveMs: null, points: 0 });
+  }
+
+  private finishRound(r: { solved: boolean; answer: string | null; solveMs: number | null; points: number }): FusionOutcome {
+    const round = this.round!;
+    const outcome: FusionOutcome = { puzzle: round.puzzle, wrong: this.wrongThisRound, boardSize: round.board.words.length, ...r };
+    this.outcomes.push(outcome);
+    this.score += r.points;
+    if (r.solved) {
+      this.streak++;
+      this.bestStreak = Math.max(this.bestStreak, this.streak);
+      this.rating += 35;
+    } else {
+      this.streak = 0;
+      this.rating -= 45;
+    }
+    this.round = null;
+    return outcome;
+  }
+
+  /** Aggregate for the results screen and progress system. */
+  summary() {
+    const solved = this.outcomes.filter((o) => o.solved);
+    const times = solved.map((o) => o.solveMs!).sort((a, b) => a - b);
+    const median = times.length ? (times.length % 2 ? times[(times.length - 1) / 2] : (times[times.length / 2 - 1] + times[times.length / 2]) / 2) : null;
+    const wrong = this.outcomes.reduce((s, o) => s + o.wrong, 0);
+    const ratingEvents: RatingEvent[] = [];
+    for (const o of this.outcomes) {
+      const difficulty = o.puzzle.difficulty + 8 * (o.boardSize - 10);
+      const speed = o.solveMs === null ? 0 : Math.min(1, Math.max(0, (25_000 - o.solveMs) / 20_000));
+      const score = o.solved ? 0.6 + 0.4 * speed : 0;
+      ratingEvents.push({ skill: "fusion", difficulty, score });
+      if (o.puzzle.target.length >= 8) ratingEvents.push({ skill: "longWords", difficulty, score, weight: 0.5 });
+    }
+    return {
+      solved: solved.length,
+      total: this.outcomes.length,
+      accuracy: this.outcomes.length ? solved.length / this.outcomes.length : 0,
+      medianMs: median,
+      solveTimesMs: times,
+      wrong,
+      bestStreak: this.bestStreak,
+      score: this.score,
+      ratingEvents,
+      missed: this.outcomes.filter((o) => !o.solved),
+    };
+  }
 }

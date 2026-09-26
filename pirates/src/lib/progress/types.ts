@@ -168,6 +168,8 @@ export interface SessionResult {
   missed: MissedInput[];
   /** Review mode: what happened to each card. */
   reviewed?: { id: string; solved: boolean; solveMs: number | null; revealed: boolean }[];
+  /** The deck was already updated card by card (so applySession only counts stats). */
+  reviewApplied?: boolean;
   /** Mode-specific extras used by achievements. */
   fusionStreak?: number;
   perfect?: boolean;

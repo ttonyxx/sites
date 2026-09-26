@@ -161,4 +161,21 @@ describe("sprint helpers", () => {
     ]);
     expect(ranked.map((m) => m.id)).toEqual(["c", "a"]);
   });
+
+  it("uses each board word in at most one reported miss", () => {
+    const m = (id: string, sources: string[], target: string, planted = false): MissedSteal => ({
+      id,
+      type: sources.length === 1 ? "steal" : "fusion",
+      sources,
+      loose: "",
+      target,
+      answers: [target],
+      difficulty: 1200,
+      availableMs: 6_000,
+      planted,
+      reason: "end",
+    });
+    const ranked = rankMissed([m("x", ["rag", "end"], "garden", true), m("y", ["end", "rat", "sit"], "strained"), m("z", ["coop", "agree"], "cooperage")]);
+    expect(ranked.map((r) => r.id)).toEqual(["x", "z"]);
+  });
 });

@@ -109,7 +109,7 @@ for (const w of lexicon.wordsWhere((w) => isTargetWorthy(w))) targetSigs.add(get
 function answersFor(sig: Signature, sources: string[]): string[] {
   return lexicon
     .anagrams(sig)
-    .filter((w) => lexicon.isPlayable(w, 1) && w.length >= 4 && !isTrivialSteal(sources, w))
+    .filter((w) => lexicon.isPlayable(w, 3) && w.length >= 4 && !isTrivialSteal(sources, w))
     .sort(
       (a, b) =>
         Number(isTargetWorthy(b)) - Number(isTargetWorthy(a)) ||

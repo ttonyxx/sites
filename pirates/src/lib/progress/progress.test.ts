@@ -198,6 +198,18 @@ describe("applySession", () => {
     expect(player.stats.reviewSolved).toBe(1);
   });
 
+  it("doesn't re-apply review outcomes that were saved card by card", () => {
+    let player = applySession(createPlayer(0), sprintResult({ missed: [miss("x")] }), 1000, "2026-09-26").player;
+    player = applySession(
+      player,
+      { ...sprintResult({ mode: "review", correct: 1, reviewed: [{ id: "x", solved: true, solveMs: 3000, revealed: false }], reviewApplied: true }) },
+      5000,
+      "2026-09-26",
+    ).player;
+    expect(player.missed.x).toMatchObject({ solves: 0 });
+    expect(player.stats.reviewSolved).toBe(1);
+  });
+
   it("has a definition for every achievement", () => {
     for (const a of ACHIEVEMENTS) expect(achievementById(a.id).title).toBeTruthy();
   });
