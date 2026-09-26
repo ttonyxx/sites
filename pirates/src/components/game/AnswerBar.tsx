@@ -102,7 +102,7 @@ export function AnswerBar({ text, stale, generation, feedback, selectedLetters, 
           )}
         </div>
       </motion.div>
-      <div className="flex h-5 items-center justify-center text-[13px]">
+      <div className="flex h-5 items-center justify-center text-[13px]" role="status" aria-live="polite">
         <AnimatePresence mode="wait">
           {feedback ? (
             <motion.span

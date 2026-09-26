@@ -42,6 +42,8 @@ export interface PlayerStats {
   longestCombo: number;
   /** Steals made in Steal Sprint. */
   wordsStolen: number;
+  /** Steals of any kind: Sprint steals, Fusion Vision solves, Review solves (not raw anagrams). */
+  stealsMade: number;
   /** Every correct answer in every mode. */
   correctAnswers: number;
   wrongAnswers: number;
