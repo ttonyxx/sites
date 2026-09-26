@@ -42,6 +42,10 @@ export function Timer({
     if (sec !== lastSecond.current) {
       lastSecond.current = sec;
       onSecond?.(sec);
+      // A heartbeat on each of the final seconds.
+      if (sec <= 5 && sec > 0 && textRef.current) {
+        textRef.current.animate([{ transform: "scale(1.18)" }, { transform: "scale(1)" }], { duration: 320, easing: "cubic-bezier(.2,.9,.25,1.15)" });
+      }
     }
   }, running);
 
@@ -50,7 +54,7 @@ export function Timer({
       <span className="label">Time</span>
       <span
         ref={textRef}
-        className="tabular font-mono text-[26px] leading-none font-medium tracking-tight text-fg transition-colors group-data-[urgent=true]:text-bad sm:text-[30px]"
+        className="tabular inline-block origin-left font-mono text-[26px] leading-none font-medium tracking-tight text-fg transition-colors group-data-[urgent=true]:text-bad sm:text-[30px]"
       >
         {formatClock(total)}
       </span>

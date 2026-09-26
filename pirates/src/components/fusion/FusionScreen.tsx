@@ -29,6 +29,7 @@ import { Icon } from "../ui/Icon";
 import { Kbd } from "../ui/Kbd";
 import { LoadingTiles } from "../ui/LoadingTiles";
 import { FusionResults, type FusionSummary } from "./FusionResults";
+import { SoundToggle } from "../SoundToggle";
 
 type Phase = "intro" | "playing" | "reveal" | "results";
 
@@ -285,6 +286,7 @@ export function FusionScreen() {
         <Link href="/" className="grid h-9 w-9 shrink-0 place-items-center rounded-xl text-faint transition-colors hover:bg-white/5 hover:text-fg" aria-label="Quit to home">
           <Icon name="x" size={18} />
         </Link>
+          <SoundToggle />
         <div className="flex min-w-0 flex-1 flex-col gap-2">
           <div className="flex items-baseline justify-between gap-3">
             <span className="label">

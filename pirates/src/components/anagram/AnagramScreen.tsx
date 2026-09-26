@@ -26,6 +26,7 @@ import { AnimatedNumber } from "../ui/AnimatedNumber";
 import { Icon } from "../ui/Icon";
 import { Kbd } from "../ui/Kbd";
 import { AnagramResults } from "./AnagramResults";
+import { SoundToggle } from "../SoundToggle";
 
 type Phase = "intro" | "countdown" | "playing" | "results";
 
@@ -221,6 +222,7 @@ export function AnagramScreen() {
           <Link href="/" className="mt-0.5 grid h-9 w-9 place-items-center rounded-xl text-faint transition-colors hover:bg-white/5 hover:text-fg" aria-label="Quit to home">
             <Icon name="x" size={18} />
           </Link>
+          <SoundToggle />
           <Timer getRemaining={() => (phase === "playing" ? Math.max(0, endsAt - performance.now()) : RAW_DURATION_MS)} total={RAW_DURATION_MS} running={phase === "playing"} />
         </div>
         <div className="flex flex-col items-center gap-1.5">
