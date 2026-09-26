@@ -140,7 +140,7 @@ export function applySession(
   if (stats.longestWord !== s.longestWord && s.longestWord) personalBests.push("Longest word");
 
   let missed = addMisses(player.missed, result.missed, result.mode, now);
-  for (const r of result.reviewed ?? []) missed = recordReview(missed, r.id, r, now);
+  if (!result.reviewApplied) for (const r of result.reviewed ?? []) missed = recordReview(missed, r.id, r, now);
 
   const streak = recordPlay(player.streak, today);
   const xpGained = xpForSession(result);

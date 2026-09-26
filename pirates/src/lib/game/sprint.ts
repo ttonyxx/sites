@@ -594,7 +594,8 @@ export class SprintGame {
       (p) => p.wordIds.length === opp.wordIds.length && p.wordIds.every((id) => opp.wordIds.includes(id)) && p.puzzle.loose === opp.loose,
     );
     const target = plantedEntry?.puzzle.target ?? opp.answers[0];
-    const notable = plantedEntry || (opp.tier >= 4 && (target.length >= 6 || opp.sources.length >= 2));
+    // Incidental steals only count if they're familiar and not sprawling three-word combos.
+    const notable = plantedEntry || (opp.tier >= 4 && opp.sources.length <= 2 && (target.length >= 6 || opp.sources.length === 2));
     if (!notable) return;
     const answers = plantedEntry?.puzzle.answers ?? opp.answers;
     const type: PuzzleType = plantedEntry?.puzzle.type ?? puzzleTypeFor(opp.sources.length, opp.loose.length);
@@ -641,18 +642,23 @@ export function rivalDelay(difficulty: number): number {
   return 16_000 + Math.min(1, Math.max(0, (difficulty - 1000) / 1000)) * 8_000;
 }
 
-/** Order misses by how instructive they are, dropping duplicates. */
+/**
+ * Order misses by how instructive they are. Duplicates go, and each board
+ * word is used at most once so one busy word can't flood the list.
+ */
 export function rankMissed(missed: readonly MissedSteal[]): MissedSteal[] {
   const value = (m: MissedSteal) =>
     (m.planted ? 1000 : 0) + m.target.length * 30 + m.sources.length * 40 + Math.min(m.availableMs, 20_000) / 200;
   const seen = new Set<string>();
+  const usedWords = new Set<string>();
   return [...missed]
     .sort((a, b) => value(b) - value(a))
     .filter((m) => {
       const key = getSignature(m.target);
-      if (seen.has(key) || seen.has(m.id)) return false;
+      if (seen.has(key) || seen.has(m.id) || m.sources.some((s) => usedWords.has(s))) return false;
       seen.add(key);
       seen.add(m.id);
+      for (const s of m.sources) usedWords.add(s);
       return true;
     });
 }

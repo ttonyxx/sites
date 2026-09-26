@@ -22,10 +22,12 @@ interface AnswerBarProps {
   placeholder?: string;
   onClear?: () => void;
   showHints?: boolean;
+  /** Not accepting input right now (hides the caret). */
+  disabled?: boolean;
 }
 
 /** The answer line: what you've typed, as small tiles, plus a feedback line. */
-export function AnswerBar({ text, stale, generation, feedback, selectedLetters, tile, placeholder = "Type a steal…", onClear, showHints = true }: AnswerBarProps) {
+export function AnswerBar({ text, stale, generation, feedback, selectedLetters, tile, placeholder = "Type a steal…", onClear, showHints = true, disabled }: AnswerBarProps) {
   const controls = useAnimationControls();
   const barRef = useRef<HTMLDivElement>(null);
   const { width } = useElementSize(barRef);
@@ -79,7 +81,7 @@ export function AnswerBar({ text, stale, generation, feedback, selectedLetters, 
               />
             ))}
           </AnimatePresence>
-          {!stale && <span className="ml-0.5 w-[2px] shrink-0 animate-caret rounded bg-accent" style={{ height: size * 0.8 }} aria-hidden />}
+          {!stale && !disabled && <span className="ml-0.5 w-[2px] shrink-0 animate-caret rounded bg-accent" style={{ height: size * 0.8 }} aria-hidden />}
         </div>
         <div className="absolute right-3 flex items-center gap-2">
           {counter && (
