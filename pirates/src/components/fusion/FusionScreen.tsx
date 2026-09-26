@@ -128,7 +128,8 @@ export function FusionScreen() {
   const begin = (d: GameData) => {
     if (!player) return;
     const s = new FusionSession(d.bank, d.lexicon, createRng(randomSeed()), {
-      rating: player.ratings.fusion.rating,
+      // Open a touch below your rating; the session adapts board by board.
+      rating: player.ratings.fusion.rating - 80,
       wordCount: narrow ? 8 : 10,
     });
     startedAt.current = Date.now();
