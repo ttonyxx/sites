@@ -8,6 +8,7 @@ import { activeCount } from "@/lib/progress/review";
 import { soft } from "@/lib/motion";
 import { usePlayer } from "@/lib/storage/player-store";
 import { MissedList, NewAchievements, PersonalBests, RatingCard, Reveal, StatGrid, XpCard } from "../results/ResultPieces";
+import { ShareButton } from "../results/ShareButton";
 import { TileWord } from "../tiles/TileWord";
 import { AnimatedNumber } from "../ui/AnimatedNumber";
 import { Button, ButtonLink } from "../ui/Button";
@@ -41,6 +42,16 @@ export function SprintResults({ result, report, onPlayAgain }: { result: SprintR
 
   const avg = result.avgSolveMs;
   const shown = result.missed.slice(0, 5);
+  const longest = [...result.pile].sort((a, b) => b.word.length - a.word.length)[0];
+  const shareText = [
+    `Pirates Blitz · Steal Sprint`,
+    `${result.score.toLocaleString("en-US")} pts · ${result.steals} steal${result.steals === 1 ? "" : "s"} · best combo ${result.bestCombo}×`,
+    longest ? `Longest steal: ${longest.sources.join(" + ").toUpperCase()}${longest.loose ? ` + ${longest.loose.toUpperCase()}` : ""} → ${longest.word.toUpperCase()}` : null,
+    `Pirate Rating ${report.overallAfter.toLocaleString("en-US")}`,
+    `https://tonyxin.com/sites/pirates/`,
+  ]
+    .filter(Boolean)
+    .join("\n");
 
   return (
     <main className="mx-auto flex w-full max-w-3xl flex-col gap-6 px-4 py-8 sm:py-12">
@@ -55,8 +66,9 @@ export function SprintResults({ result, report, onPlayAgain }: { result: SprintR
             className="tabular mt-2 block font-mono text-6xl font-semibold tracking-tight sm:text-7xl"
           />
         </motion.div>
-        <div className="mt-4">
+        <div className="mt-4 flex flex-col items-center gap-3">
           <PersonalBests items={report.personalBests} />
+          <ShareButton text={shareText} />
         </div>
       </motion.header>
 
