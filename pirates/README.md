@@ -13,6 +13,10 @@ Live at **[tonyxin.com/sites/pirates](https://tonyxin.com/sites/pirates/)**.
 | **Raw Anagrams** | 7 letters, 30 seconds, as many words as you can. |
 | **Review Mistakes** | Every missed steal, re-served with a light spaced-repetition priority. |
 
+Plus: Pirate Rating and five skill ratings (puzzle-style, not PvP), XP/levels/ranks (Deckhand → Pirate King), daily
+streaks, 12 achievements, personal bests, a stats page, glowing hints in your very first round, shareable results,
+and clocks that pause when the tab is hidden. Everything is saved locally in the browser.
+
 ## Run it
 
 ```bash
@@ -89,6 +93,22 @@ together (BATH + ROOM).
 
 Adaptive difficulty: Steal Sprint plants puzzles near a cursor that starts at your rating and moves with every
 steal (+), miss (−), and wrong answer (−).
+
+## Testing
+
+- `npm test`: 110 unit tests covering the letter engine (signatures, COOP + AGREE = COOPERAGE, FADE + LITERS =
+  FEDERALIST, IRATE + VIAL ≠ VARIETAL, subtraction, duplicates), puzzle validation (every shipped puzzle), the
+  resolver, opportunity finding, scoring, the Sprint engine (steals, combos, penalties, pool flips, rival,
+  pause, refill balance), Fusion Vision boards (exactly one fusion), Raw Anagrams, the layout (no overlaps, stable
+  positions), ratings, XP, streak/date logic, the review deck, achievements, and storage recovery.
+- Dev builds expose `window.__sprint` / `window.__fusion` so browser automation can read the live game.
+
+## Next up
+
+- Accounts + cloud save (a Supabase-backed `PlayerRepository`), then real leaderboards and a daily seeded Sprint.
+- Head-to-head Pirates: shared board, real-time steals of each other's words (the rival is a stand-in today).
+- Keyboard-only board selection (the selection API already takes ids).
+- Swap in a tournament dictionary (the lexicon builder takes any word list).
 
 ## Data sources
 
