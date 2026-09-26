@@ -11,6 +11,7 @@ import type { RatingEvent } from "../progress/types";
 import type { PuzzleBank } from "./bank";
 import { IdGen, makeWord, type Board, type Selection } from "./board";
 import { PENALIZED_REASONS, resolveSteal, type RejectReason } from "./resolve";
+import { boardAdjustment } from "./difficulty";
 import { fusionScore } from "./scoring";
 
 export const FUSION_SESSION_LENGTH = 10;
@@ -83,7 +84,8 @@ export interface FusionOutcome {
   solveMs: number | null;
   wrong: number;
   points: number;
-  boardSize: number;
+  /** Board-level difficulty adjustment (crowding + look-alike distractors). */
+  boardAdj: number;
 }
 
 export type FusionSubmit =
@@ -184,7 +186,9 @@ export class FusionSession {
 
   private finishRound(r: { solved: boolean; answer: string | null; solveMs: number | null; points: number }): FusionOutcome {
     const round = this.round!;
-    const outcome: FusionOutcome = { puzzle: round.puzzle, wrong: this.wrongThisRound, boardSize: round.board.words.length, ...r };
+    const distractors = round.board.words.filter((w) => !round.answerWordIds.includes(w.id)).map((w) => w.word);
+    const boardAdj = boardAdjustment(round.puzzle.target, round.board.words.length, distractors);
+    const outcome: FusionOutcome = { puzzle: round.puzzle, wrong: this.wrongThisRound, boardAdj, ...r };
     this.outcomes.push(outcome);
     this.score += r.points;
     if (r.solved) {
@@ -207,7 +211,7 @@ export class FusionSession {
     const wrong = this.outcomes.reduce((s, o) => s + o.wrong, 0);
     const ratingEvents: RatingEvent[] = [];
     for (const o of this.outcomes) {
-      const difficulty = o.puzzle.difficulty + 8 * (o.boardSize - 10);
+      const difficulty = o.puzzle.difficulty + o.boardAdj;
       const speed = o.solveMs === null ? 0 : Math.min(1, Math.max(0, (25_000 - o.solveMs) / 20_000));
       const score = o.solved ? 0.6 + 0.4 * speed : 0;
       ratingEvents.push({ skill: "fusion", difficulty, score });
