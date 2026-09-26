@@ -210,6 +210,12 @@ describe("applySession", () => {
     expect(player.stats.reviewSolved).toBe(1);
   });
 
+  it("doesn't count raw anagram words as steals", () => {
+    const { player, report } = applySession(createPlayer(0), sprintResult({ mode: "anagram", correct: 12, fusions: 0, words: ["ring"], bestCombo: 0, solveTimesMs: [] }), 1000, "2026-09-26");
+    expect(player.stats.stealsMade).toBe(0);
+    expect(report.newAchievements).not.toContain("first-blood");
+  });
+
   it("has a definition for every achievement", () => {
     for (const a of ACHIEVEMENTS) expect(achievementById(a.id).title).toBeTruthy();
   });

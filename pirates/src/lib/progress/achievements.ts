@@ -19,7 +19,7 @@ export const ACHIEVEMENTS: AchievementDef[] = [
     title: "First Blood",
     description: "Make your first steal",
     icon: "blood",
-    check: ({ player }) => player.stats.correctAnswers >= 1,
+    check: ({ player }) => player.stats.stealsMade >= 1,
   },
   {
     id: "lightning",
@@ -61,7 +61,7 @@ export const ACHIEVEMENTS: AchievementDef[] = [
     title: "Century",
     description: "Complete 100 steals",
     icon: "hundred",
-    check: ({ player }) => player.stats.correctAnswers >= 100,
+    check: ({ player }) => player.stats.stealsMade >= 100,
   },
   {
     id: "high-roller",

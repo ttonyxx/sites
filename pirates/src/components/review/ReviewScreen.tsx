@@ -155,15 +155,6 @@ export function ReviewScreen() {
     sfx.rival();
   };
 
-  const skip = () => {
-    if (!card || outcome) return;
-    const r: CardResult = { id: card.id, solved: false, solveMs: null, revealed: false };
-    const all = [...results, r];
-    setResults(all);
-    playerStore.recordReviewCard(r.id, r);
-    next(all);
-  };
-
   const finish = (all: CardResult[]) => {
     const solved = all.filter((r) => r.solved);
     const result: SessionResult = {
@@ -454,11 +445,8 @@ export function ReviewScreen() {
             </Button>
           ) : (
             <>
-              <Button variant="ghost" className="h-10" onClick={reveal} disabled={!canReveal} title={canReveal ? "Show the answer" : "Try once first"}>
-                <Icon name="eye" size={16} /> Reveal {!isTouch && <Kbd>tab</Kbd>}
-              </Button>
-              <Button variant="ghost" className="h-10" onClick={skip}>
-                Skip
+              <Button variant="ghost" className="h-10" onClick={reveal} disabled={!canReveal} title={canReveal ? "Show the answer" : "Have a go first"}>
+                <Icon name="eye" size={16} /> {canReveal ? "Reveal" : "Reveal after a try"} {!isTouch && canReveal && <Kbd>tab</Kbd>}
               </Button>
             </>
           )}
