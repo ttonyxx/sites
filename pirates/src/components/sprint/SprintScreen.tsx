@@ -28,6 +28,7 @@ import { StolenPile } from "../game/StolenPile";
 import { Tile } from "../tiles/Tile";
 import { Icon } from "../ui/Icon";
 import { LoadingTiles } from "../ui/LoadingTiles";
+import { SoundToggle } from "../SoundToggle";
 import { SprintIntro } from "./SprintIntro";
 import { SprintResults } from "./SprintResults";
 
@@ -313,7 +314,7 @@ export function SprintScreen() {
   return (
     <main className="mx-auto flex h-dvh w-full max-w-6xl flex-col overflow-hidden px-3 pt-3 sm:px-6 sm:pt-5">
       <header className="relative flex items-start justify-between gap-2">
-        <div className="flex items-start gap-3 sm:gap-5">
+        <div className="flex items-start gap-1 sm:gap-2">
           <Link
             href="/"
             className="mt-0.5 grid h-9 w-9 place-items-center rounded-xl text-faint transition-colors hover:bg-white/5 hover:text-fg"
@@ -321,6 +322,7 @@ export function SprintScreen() {
           >
             <Icon name="x" size={18} />
           </Link>
+          <SoundToggle />
           <div className="relative">
             <Timer
               getRemaining={() => (game ? game.remainingMs(performance.now()) : 60_000)}

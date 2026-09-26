@@ -403,10 +403,21 @@ export class SprintGame {
 
   // ── Board upkeep ──────────────────────────────────────────────────────────
 
-  /** Plant a puzzle near `target` difficulty. Returns false if nothing fit. */
+  /**
+   * Plant a puzzle near `target` difficulty. Prefers puzzles that fit on the
+   * board as-is; only if none does is an old unplanted word swept to make room.
+   * Returns false if nothing could be planted.
+   */
   private plant(g: number, target: number): boolean {
+    return this.tryPlant(g, target, 0) || this.tryPlant(g, target, 3);
+  }
+
+  private tryPlant(g: number, target: number, overflow: number): boolean {
     const onBoard = new Set(this.board.words.map((w) => w.word));
     const inPile = new Set(this.pile.map((s) => s.word));
+    // Room we could make by sweeping old words that aren't part of a planted steal.
+    const plantedWordIds = new Set([...this.planted.values()].flatMap((p) => p.wordIds));
+    const sweepable = overflow ? this.board.words.filter((w) => !plantedWordIds.has(w.id)).length : 0;
     const puzzle = this.bank.pick({
       rng: this.rng,
       types: sprintTypeWeights(target),
@@ -415,7 +426,7 @@ export class SprintGame {
         this.usedPuzzles.has(p.id) ||
         p.sources.some((s) => onBoard.has(s)) ||
         inPile.has(p.target) ||
-        this.board.words.length + p.sources.length > this.config.maxWords + 2,
+        this.board.words.length + p.sources.length > this.config.maxWords + Math.min(overflow, sweepable),
     });
     if (!puzzle) return false;
     this.usedPuzzles.add(puzzle.id);
@@ -541,7 +552,7 @@ export class SprintGame {
 
   /** A rival pirate grabs a planted steal nobody took. Returns true if it acted. */
   private rival(g: number): boolean {
-    if (g < 12_000 || this.endsAt - g < 6_000 || g - this.lastRivalAt < 9_000) return false;
+    if (g < 12_000 || this.endsAt - g < 6_000 || g - this.lastRivalAt < 12_000) return false;
     for (const [id, p] of this.planted) {
       const tracked = this.opps.get(opportunityKey(p.wordIds, p.puzzle.loose));
       if (!tracked) continue;
@@ -639,7 +650,7 @@ function clampCursor(x: number): number {
 
 /** How long a planted steal survives before the rival takes it (harder = longer). */
 export function rivalDelay(difficulty: number): number {
-  return 16_000 + Math.min(1, Math.max(0, (difficulty - 1000) / 1000)) * 8_000;
+  return 18_000 + Math.min(1, Math.max(0, (difficulty - 1000) / 1000)) * 8_000;
 }
 
 /**

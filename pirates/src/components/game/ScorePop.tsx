@@ -17,6 +17,16 @@ export function ScorePops({ pops }: { pops: readonly Pop[] }) {
     <div className="pointer-events-none absolute inset-0 z-30">
       <AnimatePresence>
         {pops.map((p) => (
+          <motion.span
+            key={`ring-${p.id}`}
+            className="absolute rounded-full border-2 border-accent/70"
+            style={{ left: p.x, top: p.y, width: 80, height: 80, marginLeft: -40, marginTop: -40, boxShadow: "0 0 30px rgba(245,181,68,.35)" }}
+            initial={{ scale: 0.3, opacity: 0.9 }}
+            animate={{ scale: 3.2, opacity: 0 }}
+            transition={{ duration: 0.6, ease: [0.16, 1, 0.3, 1] }}
+          />
+        ))}
+        {pops.map((p) => (
           <motion.div
             key={p.id}
             className="absolute flex -translate-x-1/2 -translate-y-1/2 flex-col items-center gap-1"

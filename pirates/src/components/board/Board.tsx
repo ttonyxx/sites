@@ -87,7 +87,8 @@ export function BoardView({ board, selection, onToggle, seed, capacity, longest 
                   height={height}
                   selectedIndex={selection.wordIds.indexOf(w.id)}
                   onToggle={toggle}
-                  enterDelay={initialIndex !== undefined ? 0.1 + initialIndex * 0.045 : 0.16}
+                  // Refills wait for a steal's tiles to land before dropping in.
+                  enterDelay={initialIndex !== undefined ? 0.1 + initialIndex * 0.045 : 0.34}
                 />
               );
             })}

@@ -137,8 +137,8 @@ describe("SprintGame", () => {
 
 describe("sprint helpers", () => {
   it("gives the rival longer on harder steals", () => {
-    expect(rivalDelay(900)).toBe(16_000);
-    expect(rivalDelay(2500)).toBe(24_000);
+    expect(rivalDelay(900)).toBe(18_000);
+    expect(rivalDelay(2500)).toBe(26_000);
   });
 
   it("ranks planted and longer misses first and de-duplicates", () => {
