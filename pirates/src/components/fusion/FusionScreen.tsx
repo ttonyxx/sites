@@ -90,6 +90,8 @@ export function FusionScreen() {
   const sectionRef = useRef<HTMLElement>(null);
   const clockRef = useRef<HTMLDivElement>(null);
   const startedAt = useRef(0);
+  // The reveal can be dismissed by its timer or by Enter; only the first may advance.
+  const revealHandled = useRef(true);
 
   useEffect(() => {
     if (player) setSoundEnabled(player.settings.sound);
@@ -141,6 +143,7 @@ export function FusionScreen() {
     const sourceTiles = r.answerWordIds.flatMap((id) => r.board.words.find((w) => w.id === id)!.tiles);
     for (const id of r.answerWordIds) exitKinds.set(id, "steal");
     const tiles = tilesForTarget(outcome.answer ?? outcome.puzzle.target, sourceTiles) ?? tilesForTarget(outcome.puzzle.target, sourceTiles) ?? [];
+    revealHandled.current = false;
     setReveal({ outcome, tiles });
     setOutcomes([...s.outcomes]);
     setPhase("reveal");
@@ -187,7 +190,8 @@ export function FusionScreen() {
   };
 
   const advance = () => {
-    if (!session) return;
+    if (!session || revealHandled.current) return;
+    revealHandled.current = true;
     if (session.done) finish(session);
     else deal(session, typing);
   };

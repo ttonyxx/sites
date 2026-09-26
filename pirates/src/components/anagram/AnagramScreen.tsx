@@ -59,6 +59,8 @@ export function AnagramScreen() {
   const [endsAt, setEndsAt] = useState(0);
   const [final, setFinal] = useState<{ report: SessionReport; rack: Rack; found: FoundWord[]; wrong: number } | null>(null);
   const wrong = useRef(0);
+  // rAF can fire again before React re-renders; commit each round exactly once.
+  const finished = useRef(false);
   const startedAt = useRef(0);
   const counter = useRef(0);
   const rng = useMemo(() => createRng(randomSeed()), []);
@@ -127,6 +129,7 @@ export function AnagramScreen() {
     setFeedback(null);
     setFinal(null);
     wrong.current = 0;
+    finished.current = false;
     typing.clear();
     setPhase("countdown");
   };
@@ -138,7 +141,8 @@ export function AnagramScreen() {
   };
 
   const finish = () => {
-    if (!rack || phase !== "playing") return;
+    if (!rack || phase !== "playing" || finished.current) return;
+    finished.current = true;
     const par = rackPar(rack);
     const performance01 = Math.min(1, score / Math.max(1, par * 1.25));
     const result: SessionResult = {
