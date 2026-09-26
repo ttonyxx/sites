@@ -177,6 +177,26 @@ describe("fusion vision", () => {
   });
 });
 
+describe("fusion session", () => {
+  it("reports the pair the player actually fused", async () => {
+    const { FusionSession } = await import("./fusion");
+    const session = new FusionSession(testBank(), lexicon, createRng(5), { rating: 1200, length: 2 });
+    const round = session.next(0)!;
+    const res = session.submit(round.puzzle.target, EMPTY_SELECTION, 4000);
+    expect(res.ok).toBe(true);
+    if (res.ok) {
+      expect([...res.sources].sort()).toEqual([...round.puzzle.sources].sort());
+      expect(res.wordIds.sort()).toEqual([...round.answerWordIds].sort());
+    }
+    expect(session.outcomes[0]).toMatchObject({ solved: true, answer: round.puzzle.target });
+    expect(session.outcomes[0].usedSources?.sort()).toEqual([...round.puzzle.sources].sort());
+    session.next(5000);
+    expect(session.giveUp()).toMatchObject({ solved: false, usedSources: null });
+    expect(session.done).toBe(true);
+    expect(session.summary()).toMatchObject({ solved: 1, total: 2 });
+  });
+});
+
 describe("raw anagrams", () => {
   it("builds racks with plenty of familiar words", () => {
     const rack = buildRack(lexicon, createRng(3), 1000);

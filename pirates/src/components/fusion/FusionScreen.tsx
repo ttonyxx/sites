@@ -37,6 +37,8 @@ type Phase = "intro" | "playing" | "reveal" | "results";
 interface Reveal {
   outcome: FusionOutcome;
   tiles: { id: string; letter: string }[];
+  /** Board words that fused (the player's pair, or the intended one when revealed). */
+  wordIds: string[];
 }
 
 function toSession(s: FusionSession, startedAt: number): SessionResult {
@@ -48,7 +50,7 @@ function toSession(s: FusionSession, startedAt: number): SessionResult {
     score: summary.score,
     correct: summary.solved,
     wrong: summary.wrong,
-    bestCombo: summary.bestStreak,
+    bestCombo: 0, // Fusion streaks are tracked as fusionStreak, not Sprint combos
     solveTimesMs: summary.solveTimesMs,
     words: s.outcomes.filter((o) => o.solved).map((o) => o.answer!),
     fusions: summary.solved,
@@ -100,7 +102,7 @@ export function FusionScreen() {
   // The board on screen: during a reveal, the two fused words have left it.
   const board: Board | null = useMemo(() => {
     if (!round) return null;
-    return reveal ? removePieces(round.board, round.answerWordIds, []) : round.board;
+    return reveal ? removePieces(round.board, reveal.wordIds, []) : round.board;
   }, [round, reveal]);
 
   // ── Flow ─────────────────────────────────────────────────────────────────
@@ -140,12 +142,12 @@ export function FusionScreen() {
     deal(s);
   };
 
-  const showReveal = (s: FusionSession, outcome: FusionOutcome, r: FusionRound) => {
-    const sourceTiles = r.answerWordIds.flatMap((id) => r.board.words.find((w) => w.id === id)!.tiles);
-    for (const id of r.answerWordIds) exitKinds.set(id, "steal");
-    const tiles = tilesForTarget(outcome.answer ?? outcome.puzzle.target, sourceTiles) ?? tilesForTarget(outcome.puzzle.target, sourceTiles) ?? [];
+  const showReveal = (s: FusionSession, outcome: FusionOutcome, r: FusionRound, wordIds: string[] = r.answerWordIds) => {
+    const sourceTiles = wordIds.flatMap((id) => r.board.words.find((w) => w.id === id)!.tiles);
+    for (const id of wordIds) exitKinds.set(id, "steal");
+    const tiles = tilesForTarget(outcome.answer ?? outcome.puzzle.target, sourceTiles) ?? [];
     revealHandled.current = false;
-    setReveal({ outcome, tiles });
+    setReveal({ outcome, tiles, wordIds });
     setOutcomes([...s.outcomes]);
     setPhase("reveal");
   };
@@ -165,14 +167,14 @@ export function FusionScreen() {
       }
       api.clear();
       setGeneration((g) => g + 1);
-      setFeedback({ id, tone: "good", text: `${round.puzzle.sources.map((w) => w.toUpperCase()).join(" + ")} → ${res.word.toUpperCase()}` });
+      setFeedback({ id, tone: "good", text: `${res.sources.map((w) => w.toUpperCase()).join(" + ")} → ${res.word.toUpperCase()}` });
       sfx.steal(session.streak, 2);
       const rect = sectionRef.current?.getBoundingClientRect();
       if (rect) {
         setPops((p) => [...p, { id, x: rect.width / 2, y: rect.height / 2 - (narrow ? 60 : 90), points: res.points, label: `${(res.solveMs / 1000).toFixed(1)} sec` }]);
         window.setTimeout(() => setPops((p) => p.filter((x) => x.id !== id)), 1400);
       }
-      showReveal(session, session.outcomes[session.outcomes.length - 1], round);
+      showReveal(session, session.outcomes[session.outcomes.length - 1], round, res.wordIds);
     },
     onEscape: () => {
       setSelection(EMPTY_SELECTION);

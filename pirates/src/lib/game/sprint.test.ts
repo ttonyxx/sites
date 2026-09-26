@@ -192,3 +192,22 @@ describe("hints", () => {
     expect(game.idleMs(5_000)).toBe(5_000);
   });
 });
+
+describe("refill", () => {
+  it("tops planted steals up to the target instead of over-planting", () => {
+    const counts: number[] = [];
+    for (let seed = 1; seed <= 20; seed++) {
+      const game = new SprintGame(bank, lexicon, { seed, rival: false, initialPlants: 2, plantedTarget: 2 });
+      game.start(0);
+      for (let t = 1000; t < 40_000; t += 3000) {
+        const o = game.opportunities().sort((a, b) => a.answers[0].length - b.answers[0].length)[0];
+        if (o && game.submit(o.answers[0], EMPTY_SELECTION, t).ok) counts.push(game.plantedAliveCount());
+      }
+    }
+    const avg = counts.reduce((a, b) => a + b, 0) / counts.length;
+    // Every refill restores at least one intended steal; on average we sit near the target of 2
+    // (a new plant's letters can occasionally revive an older one, so the max isn't exactly 2).
+    expect(Math.min(...counts)).toBeGreaterThanOrEqual(1);
+    expect(avg).toBeLessThan(2.7);
+  });
+});

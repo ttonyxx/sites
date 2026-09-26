@@ -126,6 +126,8 @@ const ALPHABET = "abcdefghijklmnopqrstuvwxyz";
 const OPENING_LETTERS = [..."eeeaaiioorrsstnld"];
 
 const MISS_MIN_AVAILABLE_MS = 3_000;
+/** How many of a round's misses are shown on the results screen and saved to Review Mistakes. */
+export const SPRINT_MISSES_SAVED = 5;
 const HELP_AFTER_MS = 15_000;
 const CURSOR_MIN = 650;
 const CURSOR_MAX = 2300;
@@ -556,13 +558,16 @@ export class SprintGame {
     let guard = 0;
     while (this.plantedAliveCount() < this.config.plantedTarget && guard++ < 4) {
       if (!this.plant(g, this.cursor + this.rng.int(-80, 80))) break;
+      // plantedAliveCount() reads the opportunity cache, so bring it up to date before counting again.
+      this.refresh(g, "add");
     }
     this.addDistractors(g, this.config.minWords - this.board.words.length);
     this.refresh(g, "add");
     if (!this.hasNotableOpportunity() && this.plant(g, this.cursor - 200)) this.refresh(g, "add");
   }
 
-  private plantedAliveCount(): number {
+  /** Planted (intended) steals currently available on the board. */
+  plantedAliveCount(): number {
     let n = 0;
     for (const p of this.planted.values()) if (this.opps.has(opportunityKey(p.wordIds, p.puzzle.loose))) n++;
     return n;

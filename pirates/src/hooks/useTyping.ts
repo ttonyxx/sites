@@ -54,8 +54,9 @@ export function useTyping({ enabled, onSubmit, onEscape, onSpace, maxLength = 16
   const markStale = useCallback(() => setState((s) => ({ ...s, stale: true })), []);
   const setText = useCallback((text: string) => setState({ text, stale: false }), []);
 
+  // A stale answer was already rejected: Enter again would only repeat the penalty.
   const submit = useEffectEvent(() => {
-    if (state.text) onSubmit(state.text, { clear, markStale });
+    if (state.text && !state.stale) onSubmit(state.text, { clear, markStale });
   });
   const escape = useEffectEvent(() => {
     clear();
@@ -71,7 +72,7 @@ export function useTyping({ enabled, onSubmit, onEscape, onSpace, maxLength = 16
     if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable)) return;
     if (e.key === "Enter") {
       e.preventDefault();
-      submit();
+      if (!e.repeat) submit();
     } else if (e.key === "Escape") {
       e.preventDefault();
       escape();
@@ -96,7 +97,7 @@ export function useTyping({ enabled, onSubmit, onEscape, onSpace, maxLength = 16
 
   /** For on-screen keyboards / buttons (same semantics as the physical Enter key). */
   const pressEnter = () => {
-    if (state.text) onSubmit(state.text, { clear, markStale });
+    if (state.text && !state.stale) onSubmit(state.text, { clear, markStale });
   };
 
   return { text: state.text, stale: state.stale, type, backspace, clear, markStale, setText, pressEnter };

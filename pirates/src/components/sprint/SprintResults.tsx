@@ -2,7 +2,7 @@
 import { motion } from "motion/react";
 import { useRouter } from "next/navigation";
 import { useEffect, useEffectEvent } from "react";
-import type { SprintResult } from "@/lib/game/sprint";
+import { SPRINT_MISSES_SAVED, type SprintResult } from "@/lib/game/sprint";
 import type { SessionReport } from "@/lib/progress/player";
 import { activeCount } from "@/lib/progress/review";
 import { soft } from "@/lib/motion";
@@ -41,7 +41,7 @@ export function SprintResults({ result, report, onPlayAgain }: { result: SprintR
   }, []);
 
   const avg = result.avgSolveMs;
-  const shown = result.missed.slice(0, 5);
+  const shown = result.missed.slice(0, SPRINT_MISSES_SAVED);
   const longest = [...result.pile].sort((a, b) => b.word.length - a.word.length)[0];
   const shareText = [
     `Pirates Blitz · Steal Sprint`,

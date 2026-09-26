@@ -88,7 +88,7 @@ export function FusionResults({
               transition={{ ...soft, delay: 0.5 + i * 0.04 }}
             >
               <span className="tabular w-5 font-mono text-xs text-faint">{i + 1}</span>
-              <span className="font-mono text-xs uppercase text-muted">{o.puzzle.sources.join(" + ")}</span>
+              <span className="font-mono text-xs uppercase text-muted">{(o.usedSources ?? o.puzzle.sources).join(" + ")}</span>
               <span className="font-mono text-xs text-faint">→</span>
               <TileWord word={o.answer ?? o.puzzle.target} size={17} tone={o.solved ? "won" : "bad"} />
               <span className="ml-auto flex items-center gap-2 font-mono text-xs">

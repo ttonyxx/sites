@@ -81,6 +81,8 @@ export interface FusionOutcome {
   solved: boolean;
   /** What the player typed when they solved it (may be another valid fusion). */
   answer: string | null;
+  /** The two board words the player actually fused (null if unsolved). */
+  usedSources: string[] | null;
   solveMs: number | null;
   wrong: number;
   points: number;
@@ -89,7 +91,7 @@ export interface FusionOutcome {
 }
 
 export type FusionSubmit =
-  | { ok: true; word: string; points: number; solveMs: number; wordIds: string[] }
+  | { ok: true; word: string; points: number; solveMs: number; wordIds: string[]; sources: string[] }
   | { ok: false; reason: RejectReason | "needs-two-words"; word: string; diff?: { missing: string; extra: string } };
 
 /**
@@ -174,17 +176,17 @@ export class FusionSession {
     }
     const solveMs = Math.max(300, now - this.roundStart);
     const points = fusionScore(res.plan.word.length, solveMs, round.puzzle.difficulty);
-    this.finishRound({ solved: true, answer: res.plan.word, solveMs, points });
-    return { ok: true, word: res.plan.word, points, solveMs, wordIds: res.plan.wordIds };
+    this.finishRound({ solved: true, answer: res.plan.word, usedSources: res.plan.sources, solveMs, points });
+    return { ok: true, word: res.plan.word, points, solveMs, wordIds: res.plan.wordIds, sources: res.plan.sources };
   }
 
   /** Time ran out or the player gave up. */
   giveUp(): FusionOutcome | null {
     if (!this.round) return null;
-    return this.finishRound({ solved: false, answer: null, solveMs: null, points: 0 });
+    return this.finishRound({ solved: false, answer: null, usedSources: null, solveMs: null, points: 0 });
   }
 
-  private finishRound(r: { solved: boolean; answer: string | null; solveMs: number | null; points: number }): FusionOutcome {
+  private finishRound(r: { solved: boolean; answer: string | null; usedSources: string[] | null; solveMs: number | null; points: number }): FusionOutcome {
     const round = this.round!;
     const distractors = round.board.words.filter((w) => !round.answerWordIds.includes(w.id)).map((w) => w.word);
     const boardAdj = boardAdjustment(round.puzzle.target, round.board.words.length, distractors);
