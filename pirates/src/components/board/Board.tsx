@@ -25,13 +25,15 @@ interface BoardViewProps {
   longest?: number;
   exitKinds: ExitKinds;
   showPool?: boolean;
+  /** Word / loose-letter ids to softly highlight (first-game hints). */
+  hinted?: ReadonlySet<string>;
   /** Overlays drawn on top of the word area (score pops, countdown…). */
   children?: ReactNode;
   ref?: Ref<BoardHandle>;
 }
 
 /** The table: words scattered like physical tiles, with the pool of loose letters beneath. */
-export function BoardView({ board, selection, onToggle, seed, capacity, longest = 11, exitKinds, showPool = true, children, ref }: BoardViewProps) {
+export function BoardView({ board, selection, onToggle, seed, capacity, longest = 11, exitKinds, showPool = true, hinted, children, ref }: BoardViewProps) {
   const areaRef = useRef<HTMLDivElement>(null);
   const { width, height } = useElementSize(areaRef);
   const narrow = width > 0 && width < NARROW_BOARD;
@@ -87,6 +89,7 @@ export function BoardView({ board, selection, onToggle, seed, capacity, longest 
                   height={height}
                   selectedIndex={selection.wordIds.indexOf(w.id)}
                   onToggle={toggle}
+                  hinted={hinted?.has(w.id)}
                   // Refills wait for a steal's tiles to land before dropping in.
                   enterDelay={initialIndex !== undefined ? 0.1 + initialIndex * 0.045 : 0.34}
                 />
@@ -96,7 +99,7 @@ export function BoardView({ board, selection, onToggle, seed, capacity, longest 
         )}
         {children}
       </div>
-      {showPool && <Pool loose={board.loose} selectedIds={selection.looseIds} onToggle={toggle} tile={poolTile} exitKinds={exitKinds} />}
+      {showPool && <Pool loose={board.loose} selectedIds={selection.looseIds} onToggle={toggle} tile={poolTile} exitKinds={exitKinds} hintedIds={hinted} />}
     </div>
   );
 }

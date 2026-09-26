@@ -179,3 +179,16 @@ describe("sprint helpers", () => {
     expect(ranked.map((r) => r.id)).toEqual(["x", "z"]);
   });
 });
+
+describe("hints", () => {
+  it("points at a planted steal that's really on the board", () => {
+    const game = new SprintGame(bank, lexicon, { seed: 77 });
+    game.start(0);
+    const h = game.hint()!;
+    expect(h).not.toBeNull();
+    const words = game.view().board.words.filter((w) => h.wordIds.includes(w.id));
+    expect(words).toHaveLength(h.wordIds.length);
+    expect(game.opportunities().some((o) => o.answers.includes(h.target))).toBe(true);
+    expect(game.idleMs(5_000)).toBe(5_000);
+  });
+});

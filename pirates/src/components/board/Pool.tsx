@@ -4,7 +4,7 @@ import { memo, useMemo } from "react";
 import type { LooseLetter } from "@/lib/game/board";
 import { pop, snappy } from "@/lib/motion";
 import { Tile } from "../tiles/Tile";
-import type { ExitKind, ExitKinds } from "./WordGroup";
+import { HintGlow, type ExitKind, type ExitKinds } from "./WordGroup";
 
 interface PoolProps {
   loose: readonly LooseLetter[];
@@ -12,10 +12,11 @@ interface PoolProps {
   onToggle: (kind: "word" | "loose", id: string) => void;
   tile: number;
   exitKinds: ExitKinds;
+  hintedIds?: ReadonlySet<string>;
 }
 
 /** The pool of face-up loose letters. New letters flip over as they arrive. */
-export const Pool = memo(function Pool({ loose, selectedIds, onToggle, tile, exitKinds }: PoolProps) {
+export const Pool = memo(function Pool({ loose, selectedIds, onToggle, tile, exitKinds, hintedIds }: PoolProps) {
   return (
     <div
       className="relative flex items-center gap-3 rounded-2xl border border-line/80 bg-black/25 px-3 shadow-[inset_0_2px_14px_rgba(0,0,0,0.55)]"
@@ -27,7 +28,7 @@ export const Pool = memo(function Pool({ loose, selectedIds, onToggle, tile, exi
       <div className="flex flex-1 flex-wrap items-center py-2.5" style={{ gap: Math.max(6, tile * 0.22), perspective: 700 }}>
         <AnimatePresence mode="popLayout" custom={exitKinds}>
           {loose.map((l) => (
-            <PoolTile key={l.id} letter={l} tile={tile} selected={selectedIds.includes(l.id)} onToggle={onToggle} />
+            <PoolTile key={l.id} letter={l} tile={tile} selected={selectedIds.includes(l.id)} onToggle={onToggle} hinted={hintedIds?.has(l.id)} />
           ))}
         </AnimatePresence>
         {loose.length === 0 && (
@@ -51,11 +52,13 @@ const PoolTile = memo(function PoolTile({
   tile,
   selected,
   onToggle,
+  hinted,
 }: {
   letter: LooseLetter;
   tile: number;
   selected: boolean;
   onToggle: (kind: "word" | "loose", id: string) => void;
+  hinted?: boolean;
 }) {
   const variants = useMemo<Variants>(() => ({ exit: (kinds?: ExitKinds) => exitFor(kinds?.get(letter.id)) }), [letter.id]);
   return (
@@ -74,6 +77,7 @@ const PoolTile = memo(function PoolTile({
       whileTap={{ scale: 0.95 }}
       transition={pop}
     >
+      <AnimatePresence>{hinted && !selected && <HintGlow key="hint" radius={Math.round(tile * 0.22)} />}</AnimatePresence>
       <Tile
         layoutId={letter.id}
         letter={letter.letter}

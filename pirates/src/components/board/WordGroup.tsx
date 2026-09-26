@@ -22,6 +22,8 @@ interface WordGroupProps {
   onToggle: (kind: "word" | "loose", id: string) => void;
   /** Stagger for the entrance. */
   enterDelay?: number;
+  /** Softly pulse this word (first-game hint). */
+  hinted?: boolean;
 }
 
 export function exitTransition(kind: ExitKind | undefined, y: number) {
@@ -32,7 +34,7 @@ export function exitTransition(kind: ExitKind | undefined, y: number) {
   return { opacity: 0, scale: 0.85, filter: "blur(2px)", transition: { duration: 0.4 } };
 }
 
-export const WordGroup = memo(function WordGroup({ word, placement, tile, width, height, selectedIndex, onToggle, enterDelay = 0 }: WordGroupProps) {
+export const WordGroup = memo(function WordGroup({ word, placement, tile, width, height, selectedIndex, onToggle, enterDelay = 0, hinted }: WordGroupProps) {
   const { w, h } = wordSize(word.tiles.length, tile);
   const x = placement.cx * width - w / 2;
   const y = placement.cy * height - h / 2;
@@ -65,6 +67,7 @@ export const WordGroup = memo(function WordGroup({ word, placement, tile, width,
         whileTap={{ scale: 0.97 }}
         transition={pop}
       >
+        <AnimatePresence>{hinted && !selected && <HintGlow key="hint" radius={Math.round(tile * 0.3)} />}</AnimatePresence>
         {word.tiles.map((t, i) => (
           <Tile
             key={t.id}
@@ -102,3 +105,18 @@ export const WordGroup = memo(function WordGroup({ word, placement, tile, width,
     </motion.div>
   );
 });
+
+/** A slow amber pulse behind something the player should look at. */
+export function HintGlow({ radius }: { radius: number }) {
+  return (
+    <motion.span
+      className="pointer-events-none absolute inset-0 border-2 border-accent/70"
+      style={{ borderRadius: radius, boxShadow: "0 0 26px rgba(245,181,68,.45)" }}
+      initial={{ opacity: 0, scale: 0.94 }}
+      animate={{ opacity: [0.35, 1, 0.35], scale: 1 }}
+      exit={{ opacity: 0, transition: { duration: 0.2 } }}
+      transition={{ opacity: { duration: 1.6, repeat: Infinity, ease: "easeInOut" }, scale: { duration: 0.3 } }}
+      aria-hidden
+    />
+  );
+}

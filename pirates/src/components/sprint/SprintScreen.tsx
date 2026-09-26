@@ -35,6 +35,8 @@ import { SprintResults } from "./SprintResults";
 type Phase = "intro" | "countdown" | "playing" | "over" | "results";
 
 const noopSubscribe = () => () => {};
+/** First-round players who haven't stolen anything for this long get a glowing hint. */
+const HINT_AFTER_MS = 9_000;
 
 export function sprintStartRating(player: PlayerData): number {
   const r = player.ratings;
@@ -107,6 +109,8 @@ export function SprintScreen() {
   const [rival, setRival] = useState<RivalNote | null>(null);
   const [penaltyId, setPenaltyId] = useState(0);
   const [paused, setPaused] = useState(false);
+  const [hint, setHint] = useState<{ wordIds: string[]; looseIds: string[] } | null>(null);
+  const firstGame = useRef(false);
   const [exitKinds] = useState(() => new Map<string, ExitKind>());
   const boardRef = useRef<BoardHandle>(null);
   const startedAt = useRef(0);
@@ -126,6 +130,12 @@ export function SprintScreen() {
   );
   const board = view?.board;
   const activeSelection = useMemo(() => (board ? pruneSelection(selection, board) : selection), [selection, board]);
+  // A hint only stands while all of its pieces are still on the board.
+  const hinted = useMemo(() => {
+    if (!hint || !board) return undefined;
+    const alive = hint.wordIds.every((id) => board.words.some((w) => w.id === id)) && hint.looseIds.every((id) => board.loose.some((l) => l.id === id));
+    return alive ? new Set([...hint.wordIds, ...hint.looseIds]) : undefined;
+  }, [hint, board]);
 
   // ── Input ─────────────────────────────────────────────────────────────────
 
@@ -155,6 +165,9 @@ export function SprintScreen() {
     });
     exitKinds.clear();
     typing.clear();
+    // New players get a nudge if they're stuck in their very first round.
+    firstGame.current = player.stats.gamesByMode.sprint === 0;
+    setHint(null);
     setSelection(EMPTY_SELECTION);
     setFeedback(null);
     setPops([]);
@@ -172,7 +185,20 @@ export function SprintScreen() {
     setPhase("countdown");
   };
 
-  useAnimationFrame((now) => game?.tick(now), current === "playing" && !!game && !paused);
+  useAnimationFrame(
+    (now) => {
+      if (!game) return;
+      game.tick(now);
+      if (firstGame.current && !hinted && !game.isOver && game.idleMs(now) > HINT_AFTER_MS) {
+        const h = game.hint();
+        if (h) {
+          setHint(h);
+          setFeedback({ id: ++counter.current, tone: "info", text: `Stuck? The glowing ${h.looseIds.length ? "pieces" : "words"} combine into a new word` });
+        }
+      }
+    },
+    current === "playing" && !!game && !paused,
+  );
 
   const finish = useEffectEvent(() => {
     if (!game) return;
@@ -187,6 +213,7 @@ export function SprintScreen() {
     const id = ++counter.current;
     switch (e.type) {
       case "steal": {
+        setHint(null);
         for (const wid of e.wordIds) exitKinds.set(wid, "steal");
         for (const lid of e.looseIds) exitKinds.set(lid, "steal");
         const at = boardRef.current?.centerOf(e.wordIds);
@@ -369,6 +396,7 @@ export function SprintScreen() {
             capacity={narrow ? 58 : 84}
             longest={narrow ? 9 : 11}
             exitKinds={exitKinds}
+            hinted={hinted}
           >
             <ScorePops pops={pops} />
             <RivalToast note={rival} tile={narrow ? 13 : 16} />

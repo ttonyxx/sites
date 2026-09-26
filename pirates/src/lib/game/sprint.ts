@@ -149,6 +149,7 @@ export class SprintGame {
   private bestCombo = 0;
   private lastSuccessAt: number | null = null;
   private lastProgressAt = 0;
+  private lastStealAt = 0;
   private lastRivalAt = -Infinity;
   private nextFlipAt = 0;
   private cursor: number;
@@ -311,6 +312,27 @@ export class SprintGame {
     return () => this.eventListeners.delete(listener);
   }
 
+  /** Game-clock ms since the last steal (or the start of the round). */
+  idleMs(now: number): number {
+    return this.status === "playing" ? this.gameNow(now) - this.lastStealAt : 0;
+  }
+
+  /** The easiest intended steal on the board right now, for first-game hints. */
+  hint(): { wordIds: string[]; looseIds: string[]; target: string } | null {
+    let best: Planted | null = null;
+    for (const p of this.planted.values()) {
+      if (!this.opps.has(opportunityKey(p.wordIds, p.puzzle.loose))) continue;
+      if (!best || p.puzzle.difficulty < best.puzzle.difficulty) best = p;
+    }
+    if (!best) return null;
+    const looseIds: string[] = [];
+    for (const letter of best.puzzle.loose) {
+      const tile = this.board.loose.find((l) => l.letter === letter && !looseIds.includes(l.id));
+      if (tile) looseIds.push(tile.id);
+    }
+    return { wordIds: best.wordIds, looseIds, target: best.puzzle.target };
+  }
+
   /** Available steals right now (debugging, hints, tests). */
   opportunities(): Opportunity[] {
     return [...this.opps.values()].map((t) => t.opp);
@@ -353,6 +375,7 @@ export class SprintGame {
     this.bestCombo = Math.max(this.bestCombo, this.combo);
     this.lastSuccessAt = g;
     this.lastProgressAt = g;
+    this.lastStealAt = g;
 
     const breakdown = scoreSteal({ sourceCount: plan.sources.length, targetLength: plan.word.length, solveMs, combo: this.combo, difficulty });
     this.score += breakdown.total;
