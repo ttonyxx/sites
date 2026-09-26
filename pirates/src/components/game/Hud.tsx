@@ -50,11 +50,11 @@ export function Timer({
   }, running);
 
   return (
-    <div ref={wrapRef} className="group flex min-w-[88px] flex-col gap-1.5" data-urgent="false">
+    <div ref={wrapRef} className="group flex min-w-[64px] flex-col gap-1.5 sm:min-w-[88px]" data-urgent="false">
       <span className="label">Time</span>
       <span
         ref={textRef}
-        className="tabular inline-block origin-left font-mono text-[26px] leading-none font-medium tracking-tight text-fg transition-colors group-data-[urgent=true]:text-bad sm:text-[30px]"
+        className="tabular inline-block origin-left font-mono text-[22px] leading-none font-medium tracking-tight text-fg transition-colors group-data-[urgent=true]:text-bad min-[380px]:text-[26px] sm:text-[30px]"
       >
         {formatClock(total)}
       </span>
@@ -79,14 +79,14 @@ export function ComboMeter({ combo, getFraction, running }: { combo: number; get
   const hot = combo >= 5;
   const blazing = combo >= 10;
   return (
-    <div className="flex min-w-[96px] flex-col items-center gap-1.5">
+    <div className="flex min-w-[56px] flex-col items-center gap-1.5 sm:min-w-[96px]">
       <span className="label">Combo</span>
-      <div className="relative h-[30px]">
+      <div className="relative h-[24px] min-[380px]:h-[28px] sm:h-[30px]">
         <AnimatePresence mode="popLayout" initial={false}>
           <motion.span
             key={combo}
             className={clsx(
-              "tabular block font-mono text-[26px] leading-none font-semibold sm:text-[30px]",
+              "tabular block font-mono text-[22px] leading-none font-semibold min-[380px]:text-[26px] sm:text-[30px]",
               combo < 2 ? "text-faint" : hot ? "text-accent" : "text-fg",
             )}
             style={blazing ? { textShadow: "0 0 18px rgba(245,181,68,.55)" } : undefined}
@@ -99,7 +99,7 @@ export function ComboMeter({ combo, getFraction, running }: { combo: number; get
           </motion.span>
         </AnimatePresence>
       </div>
-      <div className="h-[3px] w-16 overflow-hidden rounded-full bg-line">
+      <div className="h-[3px] w-12 overflow-hidden rounded-full bg-line sm:w-16">
         <div ref={barRef} className={clsx("h-full origin-left rounded-full", hot ? "bg-accent" : "bg-fg/70")} style={{ transform: "scaleX(0)" }} />
       </div>
     </div>
@@ -108,9 +108,14 @@ export function ComboMeter({ combo, getFraction, running }: { combo: number; get
 
 export function ScoreDisplay({ score }: { score: number }) {
   return (
-    <div className="flex min-w-[88px] flex-col items-end gap-1.5">
+    <div className="flex min-w-[64px] flex-col items-end gap-1.5 sm:min-w-[88px]">
       <span className="label">Score</span>
-      <AnimatedNumber value={score} className="tabular font-mono text-[26px] leading-none font-medium tracking-tight sm:text-[30px]" stiffness={170} damping={26} />
+      <AnimatedNumber
+        value={score}
+        className="tabular font-mono text-[22px] leading-none font-medium tracking-tight min-[380px]:text-[26px] sm:text-[30px]"
+        stiffness={170}
+        damping={26}
+      />
       <div className="h-[3px]" />
     </div>
   );

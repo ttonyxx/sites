@@ -1,5 +1,7 @@
 "use client";
 import { motion } from "motion/react";
+import { useRef } from "react";
+import { useElementSize } from "@/hooks/useElementSize";
 import { SKILLS, type SkillRatings } from "@/lib/progress/types";
 
 const MIN = 600;
@@ -29,6 +31,17 @@ export function SkillBars({ ratings, delay = 0 }: { ratings: SkillRatings | null
         );
       })}
     </ul>
+  );
+}
+
+/** Sparkline that fills its container's width (never forces horizontal overflow). */
+export function FluidSparkline({ values, height = 40, className }: { values: number[]; height?: number; className?: string }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const { width } = useElementSize(ref);
+  return (
+    <div ref={ref} className={className} style={{ height }}>
+      {width > 0 && <Sparkline values={values} width={width} height={height} />}
+    </div>
   );
 }
 

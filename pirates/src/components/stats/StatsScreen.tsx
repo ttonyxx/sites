@@ -11,7 +11,7 @@ import { currentStreak, localDateKey } from "@/lib/progress/streak";
 import { SKILLS, type GameMode } from "@/lib/progress/types";
 import { levelProgress, nextRank, RANKS, rankFor } from "@/lib/progress/xp";
 import { playerStore, usePlayer } from "@/lib/storage/player-store";
-import { Sparkline } from "../home/Charts";
+import { FluidSparkline } from "../home/Charts";
 import { AchievementCard, Delta } from "../results/ResultPieces";
 import { TopBar } from "../TopBar";
 import { TileWord } from "../tiles/TileWord";
@@ -79,9 +79,7 @@ export function StatsScreen() {
               <span className="text-xs text-faint">Local skill rating vs puzzle difficulty — not a ranking against other players (yet).</span>
             </div>
           </div>
-          <div className="text-accent">
-            <Sparkline values={history.slice(-40)} width={520} height={80} />
-          </div>
+          <FluidSparkline values={history.slice(-40)} height={80} className="w-full min-w-0 text-accent" />
         </div>
 
         <div className="panel flex flex-col gap-4 px-6 py-5">

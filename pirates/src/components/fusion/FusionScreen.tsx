@@ -4,6 +4,7 @@ import { AnimatePresence, motion } from "motion/react";
 import Link from "next/link";
 import { useCallback, useEffect, useEffectEvent, useMemo, useRef, useState } from "react";
 import { useAnimationFrame } from "@/hooks/useAnimationFrame";
+import { useHiddenTime } from "@/hooks/useHiddenTime";
 import { useIsTouch, useMediaQuery } from "@/hooks/useMediaQuery";
 import { useTyping, type TypingApi } from "@/hooks/useTyping";
 import { useGameData, type GameData } from "@/lib/data";
@@ -217,6 +218,9 @@ export function FusionScreen() {
     if (clockRef.current) clockRef.current.style.transform = `scaleX(${left / FUSION_TIME_LIMIT_MS})`;
     if (left <= 0) giveUp();
   }, phase === "playing" && !!round);
+
+  // A hidden tab doesn't eat the board's 30 seconds.
+  useHiddenTime((ms) => session?.pauseFor(ms), phase === "playing");
 
   // Tab = show me the answer.
   const onTab = useEffectEvent(() => giveUp());
