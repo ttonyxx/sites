@@ -1,0 +1,483 @@
+#!/bin/bash
+#
+# sleep-when-done: close your MacBook's lid and let running Claude Code
+# sessions finish before the Mac goes to sleep.
+#
+# Claude Code records every session's state (busy / idle / waiting) in
+# ~/.claude/sessions/<pid>.json. A small root LaunchDaemon polls those files.
+# While any session is working it sets `pmset disablesleep 1`, which stops a
+# closed lid from sleeping the Mac. Once the work is done, or a safety limit
+# trips, it clears the flag and, if the lid is closed, sleeps the Mac.
+#
+# Usage:
+#   sudo ./sleep-when-done install [--max-hours N] [--min-battery PCT]
+#   sleep-when-done status
+#   sleep-when-done pause [30m|2h]     closing the lid sleeps normally again
+#   sleep-when-done resume
+#   sleep-when-done log [-f]
+#   sudo sleep-when-done uninstall
+
+set -u
+export PATH=/usr/bin:/bin:/usr/sbin:/sbin LC_ALL=C
+
+LABEL=local.sleep-when-done
+LIBEXEC=/usr/local/libexec/sleep-when-done
+LINK=/usr/local/bin/sleep-when-done
+PLIST=/Library/LaunchDaemons/$LABEL.plist
+LOG=/var/log/sleep-when-done.log
+STATUS_FILE=/var/run/sleep-when-done.status
+HOLD_MARKER="/Library/Application Support/sleep-when-done/holding"
+
+INTERVAL=5      # seconds between checks
+QUIET=90        # a transcript written within this many seconds counts as activity
+CPU=25          # % CPU from an idle session's child processes that counts as background work
+MAX_HOURS=3     # longest the Mac stays awake with the lid closed
+MIN_BATTERY=10  # on battery, give up and sleep at this %
+MAX_THERMAL=2   # thermal pressure that forces sleep (0 nominal, 1 moderate, 2 heavy, 3 trapping)
+
+USER_HOME=$HOME
+
+# Tests point SWD_FAKE at a directory: hardware probes and pmset calls then read
+# and write files there, so the whole daemon runs without root.
+if [ -n "${SWD_FAKE:-}" ]; then
+  LOG=$SWD_FAKE/log
+  STATUS_FILE=$SWD_FAKE/status
+  HOLD_MARKER=$SWD_FAKE/holding
+  PLIST=$SWD_FAKE/plist
+fi
+
+die() { echo "sleep-when-done: $*" >&2; exit 1; }
+log() { printf '%s  %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >> "$LOG"; }
+fake() { cat "$SWD_FAKE/$1" 2>/dev/null; }
+
+set_paths() {
+  SESSIONS_DIR=$USER_HOME/.claude/sessions
+  PROJECTS_DIR=$USER_HOME/.claude/projects
+  PAUSE_FILE="$USER_HOME/Library/Application Support/sleep-when-done/paused"
+}
+
+parse_opts() {
+  while [ $# -gt 0 ]; do
+    [ $# -ge 2 ] || die "$1 needs a value"
+    case $1 in
+      --home) USER_HOME=$2 ;;
+      --interval) INTERVAL=$2 ;;
+      --quiet) QUIET=$2 ;;
+      --cpu) CPU=$2 ;;
+      --max-hours) MAX_HOURS=$2 ;;
+      --min-battery) MIN_BATTERY=$2 ;;
+      --max-thermal) MAX_THERMAL=$2 ;;
+      *) die "unknown option: $1" ;;
+    esac
+    shift 2
+  done
+  local n
+  for n in "$INTERVAL" "$QUIET" "$CPU" "$MIN_BATTERY" "$MAX_THERMAL"; do
+    [[ $n =~ ^[0-9]+$ ]] || die "expected a whole number, got '$n'"
+  done
+  [[ $MAX_HOURS =~ ^[0-9]+(\.[0-9]+)?$ ]] || die "--max-hours expects a number, got '$MAX_HOURS'"
+  [ "$INTERVAL" -ge 1 ] || die "--interval must be at least 1"
+  MAX_SECS=$(awk -v h="$MAX_HOURS" 'BEGIN { printf "%d", h * 3600 }')
+}
+
+# ---------------------------------------------------------------- probes
+
+lid_closed() {
+  if [ -n "${SWD_FAKE:-}" ]; then [ "$(fake lid)" = closed ]; return; fi
+  ioreg -r -k AppleClamshellState -d 4 | grep -q '"AppleClamshellState" = Yes'
+}
+
+# Prints "battery 42" or "ac 100".
+power_state() {
+  if [ -n "${SWD_FAKE:-}" ]; then fake power || echo "ac 100"; return; fi
+  local out src=ac pct
+  out=$(pmset -g batt 2>/dev/null)
+  case $out in *"'Battery Power'"*) src=battery ;; esac
+  pct=$(printf '%s\n' "$out" | grep -oE '[0-9]+%' | head -n 1 | tr -d %)
+  echo "$src ${pct:-100}"
+}
+
+thermal_level() {
+  if [ -n "${SWD_FAKE:-}" ]; then fake thermal || echo 0; return; fi
+  notifyutil -g com.apple.system.thermalpressurelevel 2>/dev/null | awk '{ print $2 + 0; exit }'
+}
+
+# With an external display the Mac runs in clamshell mode on purpose, so a
+# closed lid doesn't mean the user walked away.
+external_display() {
+  if [ -n "${SWD_FAKE:-}" ]; then [ "$(fake display)" = external ]; return; fi
+  system_profiler SPDisplaysDataType -json 2>/dev/null | jq -e '
+    [.SPDisplaysDataType[]?.spdisplays_ndrvs[]?
+     | select(.spdisplays_connection_type != "spdisplays_internal")] | length > 0' >/dev/null
+}
+
+set_disablesleep() {
+  if [ -n "${SWD_FAKE:-}" ]; then echo "$1" > "$SWD_FAKE/disablesleep"; return; fi
+  pmset -a disablesleep "$1"
+}
+
+sleep_now() {
+  if [ -n "${SWD_FAKE:-}" ]; then date +%s >> "$SWD_FAKE/slept"; return; fi
+  pmset sleepnow >/dev/null
+}
+
+is_paused() {
+  [ -f "$PAUSE_FILE" ] || return 1
+  local until
+  until=$(head -c 32 "$PAUSE_FILE" 2>/dev/null | tr -cd 0-9)
+  [ -z "$until" ] || [ "$until" = 0 ] || [ "$until" -gt "$(date +%s)" ]
+}
+
+# ---------------------------------------------------------------- sessions
+
+JQ_SESSION='[.status // "unknown", (.pid // 0 | tostring), (.procStart // ""),
+             (.name // (.cwd // "?" | split("/") | last))] | @tsv'
+
+# Joins `ps` with the session files. Drops sessions whose process is gone (or
+# whose pid now belongs to something else) and sums the CPU of each session's
+# descendants: builds and test runs started in the background keep going after
+# Claude's turn ends.
+AWK_SESSIONS='
+function subtree(p,   n, a, i, s) {
+  s = 0; n = split(kids[p], a, " ")
+  for (i = 1; i <= n; i++) s += cpu[a[i]] + subtree(a[i])
+  return s
+}
+$0 == "--" { sessions = 1; next }
+!sessions {
+  if ($1 == $2) next
+  cpu[$1] = $3; kids[$2] = kids[$2] " " $1
+  s = $4; for (i = 5; i <= NF; i++) s = s " " $i
+  start[$1] = s
+  next
+}
+{
+  split($0, f, "\t")
+  if (!(f[2] in start)) next
+  gsub(/ +/, " ", f[3])
+  if (f[3] != "" && f[3] != start[f[2]]) next
+  printf "%s\t%d\t%s\n", f[1], subtree(f[2]), f[4]
+}'
+
+# One line per live session: status<TAB>child-cpu<TAB>name
+scan_sessions() {
+  set -- "$SESSIONS_DIR"/*.json
+  [ -e "$1" ] || return 0
+  local tsv f
+  tsv=$(jq -r "$JQ_SESSION" "$@" 2>/dev/null) ||
+    tsv=$(for f in "$@"; do jq -r "$JQ_SESSION" "$f" 2>/dev/null; done)
+  [ -n "$tsv" ] || return 0
+  # Claude Code writes procStart in UTC.
+  { TZ=UTC ps -axo pid=,ppid=,pcpu=,lstart=; echo "--"; printf '%s\n' "$tsv"; } | awk "$AWK_SESSIONS"
+}
+
+# Name of the session that wrote a transcript in the last $QUIET seconds.
+recent_activity() {
+  [ -d "$PROJECTS_DIR" ] || return 1
+  local hit sid name
+  hit=$(find "$PROJECTS_DIR" -name '*.jsonl' -mtime "-${QUIET}s" -print -quit 2>/dev/null)
+  [ -n "$hit" ] || return 1
+  sid=${hit#"$PROJECTS_DIR"/*/}; sid=${sid%%/*}; sid=${sid%.jsonl}
+  name=$(cat "$SESSIONS_DIR"/*.json 2>/dev/null |
+    jq -r --arg sid "$sid" 'select(.sessionId == $sid) | .name // empty' 2>/dev/null | head -n 1)
+  echo "${name:-$sid}"
+}
+
+# Sets WORK (1 if anything is running), WHY, and SESSIONS (the scan).
+evaluate() {
+  local st cpu name busy="" bg="" waiting=0 active
+  SESSIONS=$(scan_sessions)
+  while IFS=$'\t' read -r st cpu name; do
+    case $st in
+      "") ;;
+      busy) busy="${busy:+$busy, }$name" ;;
+      waiting) waiting=$((waiting + 1)) ;;
+      *) [ "$cpu" -ge "$CPU" ] && bg="${bg:+$bg, }$name (${cpu}% cpu)" ;;
+    esac
+  done <<< "$SESSIONS"
+  WORK=1
+  if [ -n "$busy" ]; then WHY="working: $busy"
+  elif [ -n "$bg" ]; then WHY="background work: $bg"
+  elif active=$(recent_activity); then WHY="just active: $active"
+  else
+    WORK=0; WHY="nothing running"
+    [ "$waiting" = 0 ] || WHY="$WHY ($waiting waiting for input)"
+  fi
+}
+
+# ---------------------------------------------------------------- daemon
+
+tick() {
+  local now want lid=open paused=0 power src pct level
+  now=$(date +%s)
+  evaluate
+  want=$WORK
+  if is_paused; then paused=1; want=0; WHY="paused"; fi
+  lid_closed && lid=closed
+
+  if [ "$lid" = closed ]; then
+    if [ "$holding" = 0 ]; then
+      # Only a hold that began with the lid open keeps a closed Mac awake. This
+      # keeps dark wakes and clamshell setups from suddenly staying up.
+      want=0
+    elif [ "$want" = 1 ]; then
+      [ "$closed_since" = 0 ] && closed_since=$now
+      power=$(power_state); src=${power% *}; pct=${power#* }
+      level=$(thermal_level); level=${level:-0}
+      if [ "$src" = battery ] && [ "$pct" -le "$MIN_BATTERY" ]; then
+        want=0; WHY="battery at ${pct}%"
+      elif [ $((now - closed_since)) -ge "$MAX_SECS" ]; then
+        want=0; WHY="lid closed for ${MAX_HOURS}h, the limit"
+      elif [ "$level" -ge "$MAX_THERMAL" ]; then
+        want=0; WHY="running hot (thermal pressure $level)"
+      fi
+    fi
+  else
+    closed_since=0
+  fi
+
+  if [ "$want" = 1 ] && [ "$holding" = 0 ]; then
+    if set_disablesleep 1; then
+      holding=1; : > "$HOLD_MARKER"
+      log "holding: $WHY"
+    fi
+  elif [ "$want" = 0 ] && [ "$holding" = 1 ]; then
+    set_disablesleep 0; holding=0; rm -f "$HOLD_MARKER"
+    if [ "$lid" != closed ]; then
+      log "released: $WHY"
+    elif external_display; then
+      log "released: $WHY (lid closed but an external display is attached, so not sleeping)"
+    else
+      log "released: $WHY. Lid is closed, sleeping"
+      sleep_now
+    fi
+  elif [ "$holding" = 1 ] && [ "$lid" != "$last_lid" ]; then
+    log "lid $lid, still holding: $WHY"
+  fi
+  last_lid=$lid
+
+  {
+    echo "updated=$now"; echo "holding=$holding"; echo "lid=$lid"; echo "paused=$paused"
+    echo "closed_since=$closed_since"; echo "why=$WHY"
+    echo "max_hours=$MAX_HOURS"; echo "min_battery=$MIN_BATTERY"
+  } > "$STATUS_FILE.tmp" && mv -f "$STATUS_FILE.tmp" "$STATUS_FILE"
+}
+
+rotate_log() {
+  [ -f "$LOG" ] && [ "$(stat -f %z "$LOG")" -gt 262144 ] || return 0
+  tail -n 2000 "$LOG" > "$LOG.tmp" && cat "$LOG.tmp" > "$LOG"
+  rm -f "$LOG.tmp"
+}
+
+on_exit() {
+  [ -n "${nap_pid:-}" ] && kill "$nap_pid" 2>/dev/null
+  if [ "$holding" = 1 ]; then
+    set_disablesleep 0; rm -f "$HOLD_MARKER"
+    log "stopped; lid sleep is back to normal"
+  else
+    log "stopped"
+  fi
+  rm -f "$STATUS_FILE"
+}
+
+cmd_daemon() {
+  parse_opts "$@"
+  [ -n "${SWD_FAKE:-}" ] || [ "$(id -u)" = 0 ] || die "the daemon runs as root via launchd; use: sudo $0 install"
+  set_paths
+  mkdir -p "$(dirname "$HOLD_MARKER")"
+  holding=0; closed_since=0; last_lid=open; nap_pid=""
+  [ -e "$HOLD_MARKER" ] && holding=1   # restarted while holding: re-check and release if idle
+  trap on_exit EXIT
+  trap 'exit 0' TERM INT HUP
+  log "started: watching $SESSIONS_DIR (max ${MAX_HOURS}h lid-closed, min battery ${MIN_BATTERY}%)"
+  local n=0
+  while :; do
+    tick
+    n=$((n + 1)); [ $((n % 720)) = 0 ] && rotate_log
+    sleep "$INTERVAL" & nap_pid=$!
+    wait "$nap_pid"
+  done
+}
+
+# ---------------------------------------------------------------- user commands
+
+ago() {
+  local s=$1
+  if [ "$s" -lt 120 ]; then echo "${s}s"
+  elif [ "$s" -lt 7200 ]; then echo "$((s / 60))m"
+  else echo "$((s / 3600))h $((s % 3600 / 60))m"; fi
+}
+
+cmd_status() {
+  set_paths
+  local now k v updated="" holding=0 lid=open paused=0 closed_since=0 why="" max_hours=$MAX_HOURS min_battery=$MIN_BATTERY
+  now=$(date +%s)
+  if [ -r "$STATUS_FILE" ]; then
+    while IFS='=' read -r k v; do
+      case $k in
+        updated) updated=$v ;; holding) holding=$v ;; lid) lid=$v ;; paused) paused=$v ;;
+        closed_since) closed_since=$v ;; why) why=$v ;;
+        max_hours) max_hours=$v ;; min_battery) min_battery=$v ;;
+      esac
+    done < "$STATUS_FILE"
+  fi
+
+  if [ ! -f "$PLIST" ]; then
+    echo "Not installed. One-time setup:  sudo $0 install"
+  elif [ -z "$updated" ]; then
+    echo "Installed, but the daemon isn't running. Check: sleep-when-done log"
+  elif [ $((now - updated)) -gt $((INTERVAL * 6 + 30)) ]; then
+    echo "Installed, but the daemon last checked in $(ago $((now - updated))) ago. Check: sleep-when-done log"
+  elif [ "$holding" = 1 ] && [ "$lid" = closed ]; then
+    echo "Lid closed, staying awake for $(ago $((now - closed_since))) so far. $why"
+  elif [ "$holding" = 1 ]; then
+    echo "Armed. Close the lid and the Mac stays awake until this finishes, then sleeps."
+    echo "  $why"
+  elif [ "$paused" = 1 ]; then
+    echo "Paused. Closing the lid sleeps the Mac right away."
+  else
+    echo "Idle. Nothing is running, so closing the lid sleeps the Mac right away."
+  fi
+
+  if [ -f "$PAUSE_FILE" ]; then
+    local until
+    until=$(head -c 32 "$PAUSE_FILE" | tr -cd 0-9)
+    if ! is_paused; then rm -f "$PAUSE_FILE"
+    elif [ -z "$until" ] || [ "$until" = 0 ]; then echo "Paused until you run: sleep-when-done resume"
+    else echo "Paused until $(date -r "$until" '+%H:%M'). Resume early with: sleep-when-done resume"; fi
+  fi
+
+  evaluate
+  local st cpu name idle=0
+  echo
+  echo "Sessions"
+  while IFS=$'\t' read -r st cpu name; do
+    case $st in
+      "") ;;
+      busy) printf '  working   %s\n' "$name" ;;
+      waiting) printf '  waiting   %s  (needs your input; does not keep the Mac awake)\n' "$name" ;;
+      *) if [ "$cpu" -ge "$CPU" ]; then printf '  bg work   %s  (%s%% cpu in child processes)\n' "$name" "$cpu"
+         else idle=$((idle + 1)); fi ;;
+    esac
+  done <<< "$SESSIONS"
+  echo "  $idle idle"
+  echo
+  echo "With the lid closed it gives up and sleeps after ${max_hours}h, at ${min_battery}% battery, or if the Mac runs hot."
+}
+
+cmd_pause() {
+  set_paths
+  local secs=0 until=0
+  if [ $# -gt 0 ]; then
+    [[ $1 =~ ^[0-9]+[smh]?$ ]] || die "pause takes a duration like 45m or 2h"
+    case $1 in
+      *h) secs=$(( ${1%h} * 3600 )) ;;
+      *m) secs=$(( ${1%m} * 60 )) ;;
+      *s) secs=${1%s} ;;
+      *) secs=$(( $1 * 60 )) ;;
+    esac
+    until=$(( $(date +%s) + secs ))
+  fi
+  mkdir -p "$(dirname "$PAUSE_FILE")"
+  echo "$until" > "$PAUSE_FILE"
+  if [ "$until" = 0 ]; then echo "Paused until you run: sleep-when-done resume"
+  else echo "Paused until $(date -r "$until" '+%H:%M')."; fi
+  echo "Closing the lid sleeps the Mac normally (takes effect within ${INTERVAL}s)."
+}
+
+cmd_resume() {
+  set_paths
+  rm -f "$PAUSE_FILE"
+  echo "Resumed. Closing the lid waits for running Claude sessions again."
+}
+
+cmd_log() {
+  [ -r "$LOG" ] || die "no log yet at $LOG"
+  if [ "${1:-}" = -f ]; then tail -n 20 -f "$LOG"; else tail -n 40 "$LOG"; fi
+}
+
+xml_escape() { printf '%s' "$1" | sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g'; }
+
+cmd_install() {
+  [ "$(id -u)" = 0 ] || die "install needs root. Run:  sudo $0 install"
+  local user=${SUDO_USER:-}
+  { [ -n "$user" ] && [ "$user" != root ]; } || die "run install with sudo from your own account"
+  USER_HOME=$(dscl . -read "/Users/$user" NFSHomeDirectory 2>/dev/null | awk '{ print $2 }')
+  parse_opts "$@"
+  [ -d "$USER_HOME/.claude" ] || die "no Claude Code data at $USER_HOME/.claude"
+  [ -x /usr/bin/jq ] || die "needs /usr/bin/jq, which ships with macOS 15 and later"
+
+  launchctl bootout "system/$LABEL" 2>/dev/null
+
+  # Replace the installed copy by rename so a running copy keeps its old file.
+  mkdir -p "$(dirname "$LIBEXEC")" "$(dirname "$LINK")" "$(dirname "$HOLD_MARKER")"
+  cat "$0" > "$LIBEXEC.new" || die "can't read $0"
+  chown root:wheel "$LIBEXEC.new" && chmod 755 "$LIBEXEC.new" && mv -f "$LIBEXEC.new" "$LIBEXEC"
+  ln -sfn "$LIBEXEC" "$LINK"
+
+  local a
+  {
+    cat <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>$LABEL</string>
+  <key>ProgramArguments</key>
+  <array>
+EOF
+    for a in "$LIBEXEC" daemon --home "$USER_HOME" --interval "$INTERVAL" --quiet "$QUIET" --cpu "$CPU" \
+             --max-hours "$MAX_HOURS" --min-battery "$MIN_BATTERY" --max-thermal "$MAX_THERMAL"; do
+      printf '    <string>%s</string>\n' "$(xml_escape "$a")"
+    done
+    cat <<EOF
+  </array>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>ThrottleInterval</key><integer>10</integer>
+  <key>StandardOutPath</key><string>$LOG</string>
+  <key>StandardErrorPath</key><string>$LOG</string>
+</dict>
+</plist>
+EOF
+  } > "$PLIST"
+  chown root:wheel "$PLIST"; chmod 644 "$PLIST"
+  plutil -lint "$PLIST" >/dev/null || die "generated an invalid $PLIST"
+
+  local try
+  for try in 1 2 3 4 5; do
+    launchctl bootstrap system "$PLIST" 2>/dev/null && break
+    [ "$try" = 5 ] && die "launchctl bootstrap failed; see $LOG"
+    sleep 1
+  done
+
+  echo "Installed. Watching Claude Code sessions for $user."
+  echo "Closing the lid now waits for running sessions to finish, then sleeps"
+  echo "(gives up after ${MAX_HOURS}h, at ${MIN_BATTERY}% battery, or if the Mac runs hot)."
+  echo "Check it any time with:  sleep-when-done status"
+}
+
+cmd_uninstall() {
+  [ "$(id -u)" = 0 ] || die "uninstall needs root. Run:  sudo sleep-when-done uninstall"
+  launchctl bootout "system/$LABEL" 2>/dev/null   # the daemon re-enables lid sleep as it exits
+  [ -e "$HOLD_MARKER" ] && pmset -a disablesleep 0
+  rm -f "$PLIST" "$LINK" "$LIBEXEC" "$STATUS_FILE" "$LOG"
+  rm -rf "$(dirname "$HOLD_MARKER")"
+  echo "Uninstalled. Closing the lid sleeps the Mac right away again."
+}
+
+usage() { sed -n '12,18p' "$0" | sed 's/^# \{0,1\}//'; }
+
+cmd=${1:-status}
+[ $# -gt 0 ] && shift
+case $cmd in
+  status) cmd_status ;;
+  pause) cmd_pause "$@" ;;
+  resume) cmd_resume ;;
+  log) cmd_log "$@" ;;
+  install) cmd_install "$@" ;;
+  uninstall) cmd_uninstall ;;
+  daemon) cmd_daemon "$@" ;;
+  -h|--help|help) usage ;;
+  *) usage; exit 1 ;;
+esac

@@ -45,3 +45,12 @@ the same way CI does and preview it under `/sites/` like production:
 ```bash
 node scripts/build-sites.mjs && node scripts/preview.mjs   # http://localhost:4173/sites/
 ```
+
+## Tools
+
+`tools/` holds small local utilities, not sites. It has no `index.html` or `package.json`, so the
+build skips it and nothing in it is published.
+
+| Tool | What it is |
+| --- | --- |
+| [`sleep-when-done`](tools/sleep-when-done) | Close the MacBook lid and let running Claude Code sessions finish before the Mac sleeps |
