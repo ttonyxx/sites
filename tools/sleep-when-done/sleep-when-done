@@ -35,7 +35,7 @@ MAX_HOURS=3     # longest the Mac stays awake with the lid closed
 MIN_BATTERY=10  # on battery, give up and sleep at this %
 MAX_THERMAL=2   # thermal pressure that forces sleep (0 nominal, 1 moderate, 2 heavy, 3 trapping)
 
-USER_HOME=$HOME
+USER_HOME=${HOME:-}   # unset under launchd; the daemon gets --home
 
 # Tests point SWD_FAKE at a directory: hardware probes and pmset calls then read
 # and write files there, so the whole daemon runs without root.

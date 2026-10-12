@@ -62,7 +62,7 @@ session() {
 }
 
 start_daemon() {
-  SWD_FAKE=$FAKE "$SWD" daemon --home "$HOME_DIR" --interval 1 --quiet 3 "$@" &
+  env -u HOME SWD_FAKE=$FAKE "$SWD" daemon --home "$HOME_DIR" --interval 1 --quiet 3 "$@" &
   DAEMON=$!
 }
 stop_daemon() { kill "$DAEMON"; wait "$DAEMON" 2>/dev/null; DAEMON=""; }
