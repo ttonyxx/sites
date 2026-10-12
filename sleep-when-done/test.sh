@@ -96,12 +96,12 @@ session "$A" waiting "Session A"
 expect "a session waiting for input doesn't hold" released
 session "$A" busy "Session A"
 expect "busy again re-arms" holding
-cli pause >/dev/null
-expect "pause releases" released
-cli resume >/dev/null
-expect "resume re-arms" holding
-cli pause 3s >/dev/null
-expect "a timed pause releases" released
+cli disable >/dev/null
+expect "disable releases" released
+cli enable >/dev/null
+expect "enable re-arms" holding
+cli disable 3s >/dev/null
+expect "a timed disable releases" released
 expect "...and expires on its own" holding
 
 echo "safety limits"
@@ -171,6 +171,45 @@ start_daemon --max-hours 0.001
 expect "busy session holds" holding
 set_fake lid closed
 expect "after --max-hours with the lid closed it releases and sleeps" released_and_slept 4
+stop_daemon
+
+echo "hotspot fallback"
+joins() { [ "$(cat "$FAKE/joined" 2>/dev/null | wc -l | tr -d ' ')" = "$1" ]; }
+logged() { grep -q "$1" "$FAKE/log"; }
+set_fake known "$(printf 'Home WiFi\nKatherine’s iPhone\nTony’s iPhone\nMoxee Hotspot')"
+set_fake owner Tony
+cli hotspot auto | grep -q "fallback: Tony’s iPhone" && pass "hotspot auto picks the owner's own iPhone" ||
+  fail "hotspot auto picks the owner's own iPhone"
+set_fake owner Zed
+cli hotspot auto >/dev/null 2>&1 && fail "hotspot auto refuses to guess between two strangers' phones" ||
+  pass "hotspot auto refuses to guess between two strangers' phones"
+set_fake known "$(printf 'Home WiFi\nWork iPhone')"
+cli hotspot auto | grep -q "fallback: Work iPhone" && pass "hotspot auto takes the only iPhone there is" ||
+  fail "hotspot auto takes the only iPhone there is"
+cli hotspot "Tony’s iPhone" | grep -q "hasn't saved" && pass "naming an unsaved network warns" ||
+  fail "naming an unsaved network warns"
+set_fake known "Tony’s iPhone"
+set_fake lid open
+set_fake online yes
+start_daemon --offline-grace 1
+expect "busy session holds" holding
+set_fake online no
+stays "with the lid open it leaves the Wi-Fi alone" joins 0
+set_fake lid closed
+expect "offline with the lid closed: joins the hotspot" joins 1
+grep -qx "Tony’s iPhone" "$FAKE/joined" && pass "...the configured one" || fail "...the configured one"
+out=$(cli status)
+case $out in *"trying the hotspot"*) pass "status says it's trying the hotspot" ;;
+  *) fail "status says it's trying the hotspot"; echo "$out" ;; esac
+set_fake join fail
+expect "keeps retrying while still offline" joins 2
+expect "...and logs why it failed" logged "couldn't join hotspot"
+set_fake online yes
+expect "notices when it's back online" logged "back online"
+stays "stops trying once online" joins 2
+cli hotspot off >/dev/null
+set_fake online no
+stays "hotspot off: never touches the Wi-Fi" joins 2
 stop_daemon
 
 echo

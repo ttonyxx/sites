@@ -9,11 +9,15 @@
 # closed lid from sleeping the Mac. Once the work is done, or a safety limit
 # trips, it clears the flag and, if the lid is closed, sleeps the Mac.
 #
+# Hotspot fallback: if the internet drops while the lid is closed and sessions
+# are still working (you took the laptop with you), it joins your phone's hotspot.
+#
 # Usage:
 #   sudo ./sleep-when-done install [--max-hours N] [--min-battery PCT]
 #   sleep-when-done status
-#   sleep-when-done pause [30m|2h]     closing the lid sleeps normally again
-#   sleep-when-done resume
+#   sleep-when-done disable [45m|2h]   closing the lid sleeps normally again
+#   sleep-when-done enable
+#   sleep-when-done hotspot [auto|off|"Network name"]
 #   sleep-when-done log [-f]
 #   sudo sleep-when-done uninstall
 
@@ -28,17 +32,18 @@ LOG=/var/log/sleep-when-done.log
 STATUS_FILE=/var/run/sleep-when-done.status
 HOLD_MARKER="/Library/Application Support/sleep-when-done/holding"
 
-INTERVAL=5      # seconds between checks
-QUIET=90        # a transcript written within this many seconds counts as activity
-CPU=25          # % CPU from an idle session's child processes that counts as background work
-MAX_HOURS=3     # longest the Mac stays awake with the lid closed
-MIN_BATTERY=10  # on battery, give up and sleep at this %
-MAX_THERMAL=2   # thermal pressure that forces sleep (0 nominal, 1 moderate, 2 heavy, 3 trapping)
+INTERVAL=5        # seconds between checks
+QUIET=90          # a transcript written within this many seconds counts as activity
+CPU=25            # % CPU from an idle session's child processes that counts as background work
+MAX_HOURS=3       # longest the Mac stays awake with the lid closed
+MIN_BATTERY=10    # on battery, give up and sleep at this %
+MAX_THERMAL=2     # thermal pressure that forces sleep (0 nominal, 1 moderate, 2 heavy, 3 trapping)
+OFFLINE_GRACE=10  # seconds without internet (lid closed, still working) before joining the hotspot
 
 USER_HOME=${HOME:-}   # unset under launchd; the daemon gets --home
 
-# Tests point SWD_FAKE at a directory: hardware probes and pmset calls then read
-# and write files there, so the whole daemon runs without root.
+# Tests point SWD_FAKE at a directory: hardware probes, pmset and Wi-Fi calls
+# then read and write files there, so the whole daemon runs without root.
 if [ -n "${SWD_FAKE:-}" ]; then
   LOG=$SWD_FAKE/log
   STATUS_FILE=$SWD_FAKE/status
@@ -53,7 +58,9 @@ fake() { cat "$SWD_FAKE/$1" 2>/dev/null; }
 set_paths() {
   SESSIONS_DIR=$USER_HOME/.claude/sessions
   PROJECTS_DIR=$USER_HOME/.claude/projects
-  PAUSE_FILE="$USER_HOME/Library/Application Support/sleep-when-done/paused"
+  CONFIG_DIR="$USER_HOME/Library/Application Support/sleep-when-done"
+  PAUSE_FILE=$CONFIG_DIR/paused
+  HOTSPOT_FILE=$CONFIG_DIR/hotspot
 }
 
 parse_opts() {
@@ -67,12 +74,13 @@ parse_opts() {
       --max-hours) MAX_HOURS=$2 ;;
       --min-battery) MIN_BATTERY=$2 ;;
       --max-thermal) MAX_THERMAL=$2 ;;
+      --offline-grace) OFFLINE_GRACE=$2 ;;
       *) die "unknown option: $1" ;;
     esac
     shift 2
   done
   local n
-  for n in "$INTERVAL" "$QUIET" "$CPU" "$MIN_BATTERY" "$MAX_THERMAL"; do
+  for n in "$INTERVAL" "$QUIET" "$CPU" "$MIN_BATTERY" "$MAX_THERMAL" "$OFFLINE_GRACE"; do
     [[ $n =~ ^[0-9]+$ ]] || die "expected a whole number, got '$n'"
   done
   [[ $MAX_HOURS =~ ^[0-9]+(\.[0-9]+)?$ ]] || die "--max-hours expects a number, got '$MAX_HOURS'"
@@ -121,11 +129,78 @@ sleep_now() {
   pmset sleepnow >/dev/null
 }
 
+has_route() {
+  if [ -n "${SWD_FAKE:-}" ]; then [ "$(fake online)" != no ]; return; fi
+  route -n get default >/dev/null 2>&1
+}
+
+# Real internet, not just a Wi-Fi association: dead links and captive portals fail.
+online() {
+  if [ -n "${SWD_FAKE:-}" ]; then [ "$(fake online)" != no ]; return; fi
+  has_route && curl -fsS -m 4 http://captive.apple.com/hotspot-detect.html 2>/dev/null | grep -q Success
+}
+
+wifi_device() {
+  networksetup -listallhardwareports 2>/dev/null | awk '/^Hardware Port: (Wi-Fi|AirPort)/ { getline; print $2; exit }'
+}
+
+# Wi-Fi networks this Mac has saved, one per line.
+known_networks() {
+  if [ -n "${SWD_FAKE:-}" ]; then fake known; return 0; fi
+  local dev
+  dev=$(wifi_device)
+  [ -n "$dev" ] || return 0
+  networksetup -listpreferredwirelessnetworks "$dev" 2>/dev/null | sed -n 's/^[[:space:]]\{1,\}//p'
+}
+
+# Joins a saved network by name; macOS supplies the password from the keychain.
+join_network() {
+  if [ -n "${SWD_FAKE:-}" ]; then
+    echo "$1" >> "$SWD_FAKE/joined"
+    [ "$(fake join)" != fail ] || { JOIN_ERR="fake failure"; return 1; }
+    return 0
+  fi
+  local dev out
+  dev=$(wifi_device)
+  [ -n "$dev" ] || { JOIN_ERR="no Wi-Fi interface"; return 1; }
+  # networksetup exits 0 even when it fails; it only prints when something went wrong.
+  out=$(networksetup -setairportnetwork "$dev" "$1" 2>&1)
+  [ -z "$out" ] || { JOIN_ERR=$out; return 1; }
+}
+
 is_paused() {
   [ -f "$PAUSE_FILE" ] || return 1
   local until
   until=$(head -c 32 "$PAUSE_FILE" 2>/dev/null | tr -cd 0-9)
   [ -z "$until" ] || [ "$until" = 0 ] || [ "$until" -gt "$(date +%s)" ]
+}
+
+hotspot_name() {
+  local name
+  [ -f "$HOTSPOT_FILE" ] || return 1
+  name=$(head -n 1 "$HOTSPOT_FILE" 2>/dev/null)
+  [ -n "$name" ] && echo "$name"
+}
+
+owner_first_name() {
+  if [ -n "${SWD_FAKE:-}" ]; then fake owner; return 0; fi
+  id -F "${SUDO_USER:-$(id -un)}" 2>/dev/null | awk '{ print $1 }'
+}
+
+# The user's own phone among saved networks: an iPhone/iPad network named after
+# them ("Tony's iPhone"), or the only one there is.
+guess_hotspot() {
+  local phones first mine
+  phones=$(known_networks | grep -E 'iPhone|iPad')
+  [ -n "$phones" ] || return 1
+  first=$(owner_first_name)
+  if [ -n "$first" ]; then
+    mine=$(printf '%s\n' "$phones" |
+      awk -v f="$first" 'tolower(substr($0, 1, length(f))) == tolower(f) { print; exit }')
+    [ -n "$mine" ] && { echo "$mine"; return 0; }
+  fi
+  [ "$(printf '%s\n' "$phones" | wc -l | tr -d ' ')" = 1 ] && { echo "$phones"; return 0; }
+  return 1
 }
 
 # ---------------------------------------------------------------- sessions
@@ -207,12 +282,41 @@ evaluate() {
 
 # ---------------------------------------------------------------- daemon
 
+# Lid closed and still working. If the internet is gone, you probably took the
+# Mac with you: join the phone's hotspot so the sessions can keep going.
+hotspot_check() {
+  local ssid
+  ssid=$(hotspot_name) || return 0
+  # While online, checking every OFFLINE_GRACE seconds is plenty.
+  if [ "$offline_since" = 0 ] && [ $((now - last_probe)) -lt "$OFFLINE_GRACE" ] && has_route; then
+    return 0
+  fi
+  last_probe=$now
+  if online; then
+    [ "$offline_since" = 0 ] || log "back online"
+    offline_since=0
+    return 0
+  fi
+  if [ "$offline_since" = 0 ]; then
+    offline_since=$now
+    log "lost the internet with the lid closed"
+  fi
+  [ $((now - offline_since)) -ge "$OFFLINE_GRACE" ] || return 0
+  [ $((now - last_join)) -ge $((OFFLINE_GRACE * 3)) ] || return 0
+  last_join=$now
+  if join_network "$ssid"; then
+    log "joined hotspot: $ssid"
+  else
+    log "couldn't join hotspot $ssid: $JOIN_ERR"
+  fi
+}
+
 tick() {
   local now want lid=open paused=0 power src pct level
   now=$(date +%s)
   evaluate
   want=$WORK
-  if is_paused; then paused=1; want=0; WHY="paused"; fi
+  if is_paused; then paused=1; want=0; WHY="disabled"; fi
   lid_closed && lid=closed
 
   if [ "$lid" = closed ]; then
@@ -256,9 +360,15 @@ tick() {
   fi
   last_lid=$lid
 
+  if [ "$holding" = 1 ] && [ "$lid" = closed ]; then
+    hotspot_check
+  else
+    offline_since=0
+  fi
+
   {
     echo "updated=$now"; echo "holding=$holding"; echo "lid=$lid"; echo "paused=$paused"
-    echo "closed_since=$closed_since"; echo "why=$WHY"
+    echo "closed_since=$closed_since"; echo "offline_since=$offline_since"; echo "why=$WHY"
     echo "max_hours=$MAX_HOURS"; echo "min_battery=$MIN_BATTERY"
   } > "$STATUS_FILE.tmp" && mv -f "$STATUS_FILE.tmp" "$STATUS_FILE"
 }
@@ -286,6 +396,7 @@ cmd_daemon() {
   set_paths
   mkdir -p "$(dirname "$HOLD_MARKER")"
   holding=0; closed_since=0; last_lid=open; nap_pid=""
+  offline_since=0; last_probe=0; last_join=0
   [ -e "$HOLD_MARKER" ] && holding=1   # restarted while holding: re-check and release if idle
   trap on_exit EXIT
   trap 'exit 0' TERM INT HUP
@@ -310,13 +421,14 @@ ago() {
 
 cmd_status() {
   set_paths
-  local now k v updated="" holding=0 lid=open paused=0 closed_since=0 why="" max_hours=$MAX_HOURS min_battery=$MIN_BATTERY
+  local now k v updated="" holding=0 lid=open paused=0 closed_since=0 offline_since=0 why=""
+  local max_hours=$MAX_HOURS min_battery=$MIN_BATTERY
   now=$(date +%s)
   if [ -r "$STATUS_FILE" ]; then
     while IFS='=' read -r k v; do
       case $k in
         updated) updated=$v ;; holding) holding=$v ;; lid) lid=$v ;; paused) paused=$v ;;
-        closed_since) closed_since=$v ;; why) why=$v ;;
+        closed_since) closed_since=$v ;; offline_since) offline_since=$v ;; why) why=$v ;;
         max_hours) max_hours=$v ;; min_battery) min_battery=$v ;;
       esac
     done < "$STATUS_FILE"
@@ -330,11 +442,12 @@ cmd_status() {
     echo "Installed, but the daemon last checked in $(ago $((now - updated))) ago. Check: sleep-when-done log"
   elif [ "$holding" = 1 ] && [ "$lid" = closed ]; then
     echo "Lid closed, staying awake for $(ago $((now - closed_since))) so far. $why"
+    [ "$offline_since" = 0 ] || echo "  Offline for $(ago $((now - offline_since))), trying the hotspot."
   elif [ "$holding" = 1 ]; then
     echo "Armed. Close the lid and the Mac stays awake until this finishes, then sleeps."
     echo "  $why"
   elif [ "$paused" = 1 ]; then
-    echo "Paused. Closing the lid sleeps the Mac right away."
+    echo "Disabled. Closing the lid sleeps the Mac right away."
   else
     echo "Idle. Nothing is running, so closing the lid sleeps the Mac right away."
   fi
@@ -343,12 +456,12 @@ cmd_status() {
     local until
     until=$(head -c 32 "$PAUSE_FILE" | tr -cd 0-9)
     if ! is_paused; then rm -f "$PAUSE_FILE"
-    elif [ -z "$until" ] || [ "$until" = 0 ]; then echo "Paused until you run: sleep-when-done resume"
-    else echo "Paused until $(date -r "$until" '+%H:%M'). Resume early with: sleep-when-done resume"; fi
+    elif [ -z "$until" ] || [ "$until" = 0 ]; then echo "Disabled until you run: sleep-when-done enable"
+    else echo "Disabled until $(date -r "$until" '+%H:%M'). Turn it back on early with: sleep-when-done enable"; fi
   fi
 
   evaluate
-  local st cpu name idle=0
+  local st cpu name idle=0 hotspot
   echo
   echo "Sessions"
   while IFS=$'\t' read -r st cpu name; do
@@ -362,14 +475,19 @@ cmd_status() {
   done <<< "$SESSIONS"
   echo "  $idle idle"
   echo
+  if hotspot=$(hotspot_name); then
+    echo "Hotspot fallback: $hotspot (joined if the internet drops while the lid is closed)"
+  else
+    echo "Hotspot fallback: off. Turn it on with: sleep-when-done hotspot auto"
+  fi
   echo "With the lid closed it gives up and sleeps after ${max_hours}h, at ${min_battery}% battery, or if the Mac runs hot."
 }
 
-cmd_pause() {
+cmd_disable() {
   set_paths
   local secs=0 until=0
   if [ $# -gt 0 ]; then
-    [[ $1 =~ ^[0-9]+[smh]?$ ]] || die "pause takes a duration like 45m or 2h"
+    [[ $1 =~ ^[0-9]+[smh]?$ ]] || die "disable takes a duration like 45m or 2h"
     case $1 in
       *h) secs=$(( ${1%h} * 3600 )) ;;
       *m) secs=$(( ${1%m} * 60 )) ;;
@@ -378,17 +496,59 @@ cmd_pause() {
     esac
     until=$(( $(date +%s) + secs ))
   fi
-  mkdir -p "$(dirname "$PAUSE_FILE")"
+  mkdir -p "$CONFIG_DIR"
   echo "$until" > "$PAUSE_FILE"
-  if [ "$until" = 0 ]; then echo "Paused until you run: sleep-when-done resume"
-  else echo "Paused until $(date -r "$until" '+%H:%M')."; fi
+  if [ "$until" = 0 ]; then echo "Disabled until you run: sleep-when-done enable"
+  else echo "Disabled until $(date -r "$until" '+%H:%M')."; fi
   echo "Closing the lid sleeps the Mac normally (takes effect within ${INTERVAL}s)."
 }
 
-cmd_resume() {
+cmd_enable() {
   set_paths
   rm -f "$PAUSE_FILE"
-  echo "Resumed. Closing the lid waits for running Claude sessions again."
+  echo "Enabled. Closing the lid waits for running Claude sessions to finish, then sleeps."
+}
+
+save_hotspot() {
+  mkdir -p "$CONFIG_DIR"
+  printf '%s\n' "$1" > "$HOTSPOT_FILE"
+  echo "Hotspot fallback: $1"
+  if ! known_networks | grep -qxF "$1"; then
+    echo "Note: this Mac hasn't saved \"$1\" yet. Join it once from the Wi-Fi menu so macOS has its password."
+  fi
+}
+
+cmd_hotspot() {
+  set_paths
+  local name phones
+  case ${1:-} in
+    "")
+      if name=$(hotspot_name); then echo "Hotspot fallback: $name"
+      else echo "Hotspot fallback: off"; fi
+      echo "If the internet drops while the lid is closed and sessions are still working, it joins this network."
+      phones=$(known_networks | grep -E 'iPhone|iPad')
+      if [ -n "$phones" ]; then
+        echo
+        echo "Phone hotspots this Mac has saved:"
+        printf '%s\n' "$phones" | sed 's/^/  /'
+      fi
+      echo
+      echo "Set it:  sleep-when-done hotspot auto   or   sleep-when-done hotspot \"Network name\""
+      echo "Turn it off:  sleep-when-done hotspot off"
+      ;;
+    off)
+      rm -f "$HOTSPOT_FILE"
+      echo "Hotspot fallback off."
+      ;;
+    auto)
+      name=$(guess_hotspot) ||
+        die "couldn't tell which saved network is your phone. Name it: sleep-when-done hotspot \"Network name\""
+      save_hotspot "$name"
+      ;;
+    *)
+      save_hotspot "$1"
+      ;;
+  esac
 }
 
 cmd_log() {
@@ -404,6 +564,7 @@ cmd_install() {
   { [ -n "$user" ] && [ "$user" != root ]; } || die "run install with sudo from your own account"
   USER_HOME=$(dscl . -read "/Users/$user" NFSHomeDirectory 2>/dev/null | awk '{ print $2 }')
   parse_opts "$@"
+  set_paths
   [ -d "$USER_HOME/.claude" ] || die "no Claude Code data at $USER_HOME/.claude"
   [ -x /usr/bin/jq ] || die "needs /usr/bin/jq, which ships with macOS 15 and later"
 
@@ -427,7 +588,8 @@ cmd_install() {
   <array>
 EOF
     for a in "$LIBEXEC" daemon --home "$USER_HOME" --interval "$INTERVAL" --quiet "$QUIET" --cpu "$CPU" \
-             --max-hours "$MAX_HOURS" --min-battery "$MIN_BATTERY" --max-thermal "$MAX_THERMAL"; do
+             --max-hours "$MAX_HOURS" --min-battery "$MIN_BATTERY" --max-thermal "$MAX_THERMAL" \
+             --offline-grace "$OFFLINE_GRACE"; do
       printf '    <string>%s</string>\n' "$(xml_escape "$a")"
     done
     cat <<EOF
@@ -451,9 +613,22 @@ EOF
     sleep 1
   done
 
+  # First install: point the hotspot fallback at the user's own phone if it's obvious.
+  local hotspot
+  if ! hotspot_name >/dev/null && hotspot=$(guess_hotspot); then
+    mkdir -p "$CONFIG_DIR"
+    printf '%s\n' "$hotspot" > "$HOTSPOT_FILE"
+    chown -R "$user" "$CONFIG_DIR"
+  fi
+
   echo "Installed. Watching Claude Code sessions for $user."
   echo "Closing the lid now waits for running sessions to finish, then sleeps"
   echo "(gives up after ${MAX_HOURS}h, at ${MIN_BATTERY}% battery, or if the Mac runs hot)."
+  if hotspot=$(hotspot_name); then
+    echo "Hotspot fallback: $hotspot. Change it with: sleep-when-done hotspot"
+  else
+    echo "Hotspot fallback: off. Turn it on with: sleep-when-done hotspot auto"
+  fi
   echo "Check it any time with:  sleep-when-done status"
 }
 
@@ -463,21 +638,27 @@ cmd_uninstall() {
   [ -e "$HOLD_MARKER" ] && pmset -a disablesleep 0
   rm -f "$PLIST" "$LINK" "$LIBEXEC" "$STATUS_FILE" "$LOG"
   rm -rf "$(dirname "$HOLD_MARKER")"
+  if [ -n "${SUDO_USER:-}" ]; then
+    USER_HOME=$(dscl . -read "/Users/$SUDO_USER" NFSHomeDirectory 2>/dev/null | awk '{ print $2 }')
+    set_paths
+    [ -n "$USER_HOME" ] && rm -rf "$CONFIG_DIR"
+  fi
   echo "Uninstalled. Closing the lid sleeps the Mac right away again."
 }
 
-usage() { sed -n '12,18p' "$0" | sed 's/^# \{0,1\}//'; }
+usage() { awk '/^# Usage:/ { p = 1; next } p && !/^#/ { exit } p' "$0" | sed 's/^# \{0,1\}//'; }
 
 cmd=${1:-status}
 [ $# -gt 0 ] && shift
 case $cmd in
   status) cmd_status ;;
-  pause) cmd_pause "$@" ;;
-  resume) cmd_resume ;;
+  enable|resume) cmd_enable ;;
+  disable|pause) cmd_disable "$@" ;;
+  hotspot) cmd_hotspot "$@" ;;
   log) cmd_log "$@" ;;
   install) cmd_install "$@" ;;
   uninstall) cmd_uninstall ;;
   daemon) cmd_daemon "$@" ;;
-  -h|--help|help) usage ;;
-  *) usage; exit 1 ;;
+  -h|--help|help) echo "Usage:"; usage ;;
+  *) echo "Usage:"; usage; exit 1 ;;
 esac

@@ -11,6 +11,7 @@ https://tonyxin.com/sites/<folder>/
 | Site | URL | What it is |
 | --- | --- | --- |
 | [`pirates`](pirates) | [tonyxin.com/sites/pirates](https://tonyxin.com/sites/pirates/) | **Pirates Blitz**: an arcade trainer for the anagram-stealing word game Pirates |
+| [`sleep-when-done`](sleep-when-done) | [tonyxin.com/sites/sleep-when-done](https://tonyxin.com/sites/sleep-when-done/) | Close your MacBook while Claude Code works: sessions finish, then it sleeps (with hotspot fallback). The page hosts the script and agent install instructions. |
 
 ## How publishing works
 
@@ -45,12 +46,3 @@ the same way CI does and preview it under `/sites/` like production:
 ```bash
 node scripts/build-sites.mjs && node scripts/preview.mjs   # http://localhost:4173/sites/
 ```
-
-## Tools
-
-`tools/` holds small local utilities, not sites. It has no `index.html` or `package.json`, so the
-build skips it and nothing in it is published.
-
-| Tool | What it is |
-| --- | --- |
-| [`sleep-when-done`](tools/sleep-when-done) | Close the MacBook lid and let running Claude Code sessions finish before the Mac sleeps |
