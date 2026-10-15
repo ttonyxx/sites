@@ -39,7 +39,8 @@ A session `waiting` for input doesn't count.
 
 The Mac only stays awake with the lid closed if the work was already running when the lid
 closed. It never sleeps the Mac while an external display is attached. With the lid closed,
-it gives up and sleeps after 3h, at 10% battery, or under heavy thermal pressure.
+it gives up and sleeps after 3h, at 10% battery, or at "trapping" thermal pressure. That is macOS's
+last step before it sleeps the Mac itself. "Heavy" pressure only means throttling, so it keeps going.
 
 The hotspot is chosen per Mac. `install` (or `sleep-when-done hotspot auto`) picks a saved
 iPhone/iPad network named after the Mac's owner, like "Alex's iPhone". If only one phone

@@ -116,7 +116,9 @@ expect "re-arms on lid open" holding
 set_fake lid closed
 sleep 1.2
 set_fake thermal 2
-expect "heavy thermal pressure releases and sleeps" released_and_slept 3
+stays "heavy thermal pressure (just throttling) keeps going" holding
+set_fake thermal 3
+expect "trapping thermal pressure releases and sleeps" released_and_slept 3
 set_fake thermal 0
 set_fake lid open
 expect "re-arms on lid open" holding

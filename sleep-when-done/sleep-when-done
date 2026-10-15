@@ -37,7 +37,8 @@ QUIET=90          # a transcript written within this many seconds counts as acti
 CPU=25            # % CPU from an idle session's child processes that counts as background work
 MAX_HOURS=3       # longest the Mac stays awake with the lid closed
 MIN_BATTERY=10    # on battery, give up and sleep at this %
-MAX_THERMAL=2     # thermal pressure that forces sleep (0 nominal, 1 moderate, 2 heavy, 3 trapping)
+MAX_THERMAL=3     # thermal pressure that forces sleep (0 nominal, 1 moderate, 2 heavy, 3 trapping, 4 sleeping).
+                  # Heavy only means macOS is throttling; trapping is its last step before sleeping the Mac itself.
 OFFLINE_GRACE=10  # seconds without internet (lid closed, still working) before joining the hotspot
 
 USER_HOME=${HOME:-}   # unset under launchd; the daemon gets --home
@@ -103,6 +104,10 @@ power_state() {
   case $out in *"'Battery Power'"*) src=battery ;; esac
   pct=$(printf '%s\n' "$out" | grep -oE '[0-9]+%' | head -n 1 | tr -d %)
   echo "$src ${pct:-100}"
+}
+
+thermal_name() {
+  case $1 in 0) echo nominal ;; 1) echo moderate ;; 2) echo heavy ;; 3) echo trapping ;; 4) echo sleeping ;; *) echo "$1" ;; esac
 }
 
 thermal_level() {
@@ -333,7 +338,7 @@ tick() {
       elif [ $((now - closed_since)) -ge "$MAX_SECS" ]; then
         want=0; WHY="lid closed for ${MAX_HOURS}h, the limit"
       elif [ "$level" -ge "$MAX_THERMAL" ]; then
-        want=0; WHY="running hot (thermal pressure $level)"
+        want=0; WHY="running hot (thermal pressure: $(thermal_name "$level"))"
       fi
     fi
   else
@@ -480,7 +485,7 @@ cmd_status() {
   else
     echo "Hotspot fallback: off. Turn it on with: sleep-when-done hotspot auto"
   fi
-  echo "With the lid closed it gives up and sleeps after ${max_hours}h, at ${min_battery}% battery, or if the Mac runs hot."
+  echo "With the lid closed it gives up and sleeps after ${max_hours}h, at ${min_battery}% battery, or if the Mac gets dangerously hot."
 }
 
 cmd_disable() {
@@ -623,7 +628,7 @@ EOF
 
   echo "Installed. Watching Claude Code sessions for $user."
   echo "Closing the lid now waits for running sessions to finish, then sleeps"
-  echo "(gives up after ${MAX_HOURS}h, at ${MIN_BATTERY}% battery, or if the Mac runs hot)."
+  echo "(gives up after ${MAX_HOURS}h, at ${MIN_BATTERY}% battery, or if the Mac gets dangerously hot)."
   if hotspot=$(hotspot_name); then
     echo "Hotspot fallback: $hotspot. Change it with: sleep-when-done hotspot"
   else
