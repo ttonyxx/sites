@@ -115,7 +115,8 @@ None of these need `sudo`, except uninstall and install.
 - **Only work already running when the lid closes counts.** If something starts after the lid
   is closed, it won't keep the Mac awake.
 - **Safety limits:** with the lid closed, it gives up and sleeps the Mac after 3 hours, at 10%
-  battery, or under heavy thermal pressure. To change the first two, reinstall with
+  battery, or if macOS reports critical heat (thermal pressure "trapping"; "heavy" only
+  means it is throttling, which is normal under load). To change the first two, reinstall with
   `--max-hours N` or `--min-battery PCT`.
 - **External display:** with one attached (clamshell mode), it never sleeps the Mac.
 - **Emergency reset:** `sudo pmset -a disablesleep 0` always restores normal lid sleep.
