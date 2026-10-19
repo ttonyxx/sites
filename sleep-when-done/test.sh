@@ -175,44 +175,35 @@ set_fake lid closed
 expect "after --max-hours with the lid closed it releases and sleeps" released_and_slept 4
 stop_daemon
 
-echo "hotspot fallback"
-joins() { [ "$(cat "$FAKE/joined" 2>/dev/null | wc -l | tr -d ' ')" = "$1" ]; }
+echo "internet with the lid closed"
 logged() { grep -q "$1" "$FAKE/log"; }
-set_fake known "$(printf 'Home WiFi\nKatherine’s iPhone\nTony’s iPhone\nMoxee Hotspot')"
-set_fake owner Tony
-cli hotspot auto | grep -q "fallback: Tony’s iPhone" && pass "hotspot auto picks the owner's own iPhone" ||
-  fail "hotspot auto picks the owner's own iPhone"
-set_fake owner Zed
-cli hotspot auto >/dev/null 2>&1 && fail "hotspot auto refuses to guess between two strangers' phones" ||
-  pass "hotspot auto refuses to guess between two strangers' phones"
-set_fake known "$(printf 'Home WiFi\nWork iPhone')"
-cli hotspot auto | grep -q "fallback: Work iPhone" && pass "hotspot auto takes the only iPhone there is" ||
-  fail "hotspot auto takes the only iPhone there is"
-cli hotspot "Tony’s iPhone" | grep -q "hasn't saved" && pass "naming an unsaved network warns" ||
-  fail "naming an unsaved network warns"
-set_fake known "Tony’s iPhone"
+not_logged() { ! logged "$1"; }
+outages() { [ "$(grep -c 'lost the internet' "$FAKE/log")" = "$1" ]; }
 set_fake lid open
 set_fake online yes
-start_daemon --offline-grace 1
+set_fake gateway 192.168.1.254
+start_daemon
 expect "busy session holds" holding
 set_fake online no
-stays "with the lid open it leaves the Wi-Fi alone" joins 0
+stays "with the lid open it doesn't watch the internet" not_logged "lost the internet"
 set_fake lid closed
-expect "offline with the lid closed: joins the hotspot" joins 1
-grep -qx "Tony’s iPhone" "$FAKE/joined" && pass "...the configured one" || fail "...the configured one"
+expect "offline with the lid closed: logs it" logged "lost the internet with the lid closed"
 out=$(cli status)
-case $out in *"trying the hotspot"*) pass "status says it's trying the hotspot" ;;
-  *) fail "status says it's trying the hotspot"; echo "$out" ;; esac
-set_fake join fail
-expect "keeps retrying while still offline" joins 2
-expect "...and logs why it failed" logged "couldn't join hotspot"
+case $out in *"Offline for"*"up to macOS"*) pass "status says it's offline and that switching is up to macOS" ;;
+  *) fail "status says it's offline and that switching is up to macOS"; echo "$out" ;; esac
+set_fake gateway 172.20.10.1
 set_fake online yes
-expect "notices when it's back online" logged "back online"
-stays "stops trying once online" joins 2
-cli hotspot off >/dev/null
+expect "back online through an iPhone: logs it was the phone's hotspot" logged "back online after .*, on a phone's hotspot"
+set_fake gateway 192.168.1.254
 set_fake online no
-stays "hotspot off: never touches the Wi-Fi" joins 2
+expect "a second outage is logged too" outages 2
+set_fake online yes
+expect "...and coming back on ordinary Wi-Fi says just that" logged "back online after [0-9]*s$"
+stays "holds throughout" holding
 stop_daemon
+out=$(cli hotspot)
+case $out in *"can't move the Mac"*"Ask to join hotspots → Automatic"*) pass "hotspot explains that macOS has to do the switching" ;;
+  *) fail "hotspot explains that macOS has to do the switching"; echo "$out" ;; esac
 
 echo
 if [ "$fails" = 0 ]; then echo "all passed"; else echo "$fails failed"; echo "--- log"; cat "$FAKE/log"; exit 1; fi

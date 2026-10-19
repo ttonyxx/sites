@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>sleep-when-done</title>
-  <meta name="description" content="Close your MacBook while Claude Code is working. The sessions finish, then the Mac sleeps. Leave Wi-Fi and it hops onto your iPhone hotspot." />
+  <meta name="description" content="Close your MacBook while Claude Code is working. The sessions finish, then the Mac sleeps." />
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath d='M20.5 4a12 12 0 1 0 7.5 19.6A10 10 0 0 1 20.5 4z' fill='%23f2c46d'/%3E%3C/svg%3E" />
   <style>
     :root {
@@ -142,8 +142,7 @@
       <p class="lede">
         Normally, closing your MacBook puts it to sleep, even mid-task. With
         <strong>sleep-when-done</strong>, the Mac stays awake until your Claude Code sessions
-        finish, then goes to sleep. Take it with you and lose Wi-Fi, and it
-        <strong>switches to your iPhone's hotspot</strong> so the work keeps going.
+        finish, then goes to sleep.
       </p>
     </header>
 
@@ -151,7 +150,6 @@
       <div class="bar"><i></i><i></i><i></i></div>
 <pre><span class="p">$</span> sleep-when-done status
 <span class="g">Lid closed, staying awake for 14m so far.</span> working: Fix flaky tests, Landing page
-<span class="y">  Offline for 12s, trying the hotspot.</span>
 
 Sessions
   working   Fix flaky tests
@@ -159,7 +157,8 @@ Sessions
   waiting   Refactor auth  <span class="m">(needs your input; does not keep the Mac awake)</span>
   9 idle
 
-Hotspot fallback: Alex’s iPhone</pre>
+<span class="m">With the lid closed it gives up and sleeps after 3h, at 10% battery,
+or if the Mac gets dangerously hot.</span></pre>
     </div>
 
     <section id="install">
@@ -167,7 +166,7 @@ Hotspot fallback: Alex’s iPhone</pre>
       <div class="setup">
         <div class="card">
           <h3>Ask your agent <span class="tag">easiest</span></h3>
-          <p>Paste this into Claude Code. It installs the tool, checks that it works, and finds your phone's hotspot. You'll type your Mac password once.</p>
+          <p>Paste this into Claude Code. It installs the tool, checks that it works, and walks you through the hotspot setting. You'll type your Mac password once.</p>
           <div class="copy wrap">
             <pre id="prompt">Set up sleep-when-done on my Mac by following https://tonyxin.com/sites/sleep-when-done/agent.md</pre>
             <button type="button" data-copy="prompt">Copy</button>
@@ -198,8 +197,8 @@ Hotspot fallback: Alex’s iPhone</pre>
         <li>
           <span class="dot"><svg viewBox="0 0 24 24" fill="none" stroke="var(--moon)" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 8.5a15 15 0 0 1 20 0"/><path d="M5.5 12a10 10 0 0 1 13 0"/><path d="M9 15.5a5 5 0 0 1 6 0"/><circle cx="12" cy="19" r="1"/></svg></span>
           <div>
-            <h3>Wi-Fi gone? Hotspot.</h3>
-            <p>If the internet drops for 10 seconds, it joins your phone's hotspot. It picks your own phone automatically, the one named after you, like "Alex's iPhone".</p>
+            <h3>Wi-Fi gone? macOS can switch</h3>
+            <p>macOS can move the Mac onto your iPhone's hotspot on its own, but never while the Mac sleeps, so staying awake gives it the chance. Turn on Wi-Fi → <em>Ask to join hotspots</em> → <em>Automatic</em>. The tool can't make the switch itself. It logs when the internet drops and comes back.</p>
           </div>
         </li>
         <li>
@@ -219,7 +218,7 @@ Hotspot fallback: Alex’s iPhone</pre>
         <div><span class="mono">sleep-when-done disable</span><span>Turn it off. Closing the lid sleeps the Mac right away again.</span></div>
         <div><span class="mono">sleep-when-done disable 2h</span><span>Turn it off for a while</span></div>
         <div><span class="mono">sleep-when-done enable</span><span>Turn it back on</span></div>
-        <div><span class="mono">sleep-when-done hotspot</span><span>Show the hotspot it uses. Add <code>auto</code>, <code>off</code> or <code>"Name"</code> to change it.</span></div>
+        <div><span class="mono">sleep-when-done hotspot</span><span>How macOS can switch to your phone's hotspot, and the setting to turn on</span></div>
         <div><span class="mono">sleep-when-done log</span><span>What it did, and why</span></div>
         <div><span class="mono">sudo sleep-when-done uninstall</span><span>Remove everything</span></div>
       </div>
@@ -232,7 +231,7 @@ Hotspot fallback: Alex’s iPhone</pre>
         <li><strong>Questions don't count.</strong> A session waiting for your answer won't keep the Mac awake, since nobody is there to answer it.</li>
         <li><strong>External display?</strong> In clamshell mode it never sleeps the Mac for you.</li>
         <li><strong>Fails safe.</strong> If the service ever stops, normal lid sleep comes back. As a manual reset, <code>sudo pmset -a disablesleep 0</code> always works.</li>
-        <li><strong>For the hotspot</strong>, the Mac must have joined it once before. On the iPhone, turn on Personal Hotspot → <em>Allow Others to Join</em>. On the Mac, set Wi-Fi → <em>Ask to join hotspots</em> → <em>Automatic</em> for the smoothest switch.</li>
+        <li><strong>It never touches your Wi-Fi.</strong> Switching to your iPhone's hotspot is up to macOS, which does it only once you've left every saved network. If the Wi-Fi stays connected but loses its internet, macOS asks first, and nobody is there to answer.</li>
       </ul>
     </section>
 
