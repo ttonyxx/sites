@@ -11,7 +11,7 @@ https://tonyxin.com/sites/<folder>/
 | Site | URL | What it is |
 | --- | --- | --- |
 | [`pirates`](pirates) | [tonyxin.com/sites/pirates](https://tonyxin.com/sites/pirates/) | **Pirates Blitz**: an arcade trainer for the anagram-stealing word game Pirates |
-| [`sleep-when-done`](sleep-when-done) | [tonyxin.com/sites/sleep-when-done](https://tonyxin.com/sites/sleep-when-done/) | Close your MacBook while Claude Code works: sessions finish, then it sleeps (with hotspot fallback). The page hosts the script and agent install instructions. |
+| [`sleep-when-done`](sleep-when-done) | [tonyxin.com/sites/sleep-when-done](https://tonyxin.com/sites/sleep-when-done/) | Close your MacBook while Claude Code works: sessions finish, then it sleeps. The page hosts the script and agent install instructions. |
 
 ## How publishing works
 

@@ -9,15 +9,20 @@
 # closed lid from sleeping the Mac. Once the work is done, or a safety limit
 # trips, it clears the flag and, if the lid is closed, sleeps the Mac.
 #
-# Hotspot fallback: if the internet drops while the lid is closed and sessions
-# are still working (you took the laptop with you), it joins your phone's hotspot.
+# Hotspot: if you take the Mac away from Wi-Fi, macOS itself can move it onto
+# your iPhone's hotspot (System Settings → Wi-Fi → Ask to join hotspots →
+# Automatic). It never does that while the Mac sleeps, so keeping the Mac awake
+# gives it the chance. This script can't switch for it: macOS only lets its own
+# Wi-Fi code wake a phone's hotspot, and `networksetup` joins saved networks
+# without their password. With the lid closed, the daemon logs when the internet
+# drops and when it comes back.
 #
 # Usage:
 #   sudo ./sleep-when-done install [--max-hours N] [--min-battery PCT]
 #   sleep-when-done status
 #   sleep-when-done disable [45m|2h]   closing the lid sleeps normally again
 #   sleep-when-done enable
-#   sleep-when-done hotspot [auto|off|"Network name"]
+#   sleep-when-done hotspot            how macOS can switch to your phone's hotspot
 #   sleep-when-done log [-f]
 #   sudo sleep-when-done uninstall
 
@@ -39,12 +44,12 @@ MAX_HOURS=3       # longest the Mac stays awake with the lid closed
 MIN_BATTERY=10    # on battery, give up and sleep at this %
 MAX_THERMAL=3     # thermal pressure that forces sleep (0 nominal, 1 moderate, 2 heavy, 3 trapping, 4 sleeping).
                   # Heavy only means macOS is throttling; trapping is its last step before sleeping the Mac itself.
-OFFLINE_GRACE=10  # seconds without internet (lid closed, still working) before joining the hotspot
+NET_CHECK=10      # with the lid closed and online, seconds between internet checks
 
 USER_HOME=${HOME:-}   # unset under launchd; the daemon gets --home
 
-# Tests point SWD_FAKE at a directory: hardware probes, pmset and Wi-Fi calls
-# then read and write files there, so the whole daemon runs without root.
+# Tests point SWD_FAKE at a directory: hardware and network probes and pmset
+# calls then read and write files there, so the whole daemon runs without root.
 if [ -n "${SWD_FAKE:-}" ]; then
   LOG=$SWD_FAKE/log
   STATUS_FILE=$SWD_FAKE/status
@@ -61,7 +66,6 @@ set_paths() {
   PROJECTS_DIR=$USER_HOME/.claude/projects
   CONFIG_DIR="$USER_HOME/Library/Application Support/sleep-when-done"
   PAUSE_FILE=$CONFIG_DIR/paused
-  HOTSPOT_FILE=$CONFIG_DIR/hotspot
 }
 
 parse_opts() {
@@ -75,13 +79,12 @@ parse_opts() {
       --max-hours) MAX_HOURS=$2 ;;
       --min-battery) MIN_BATTERY=$2 ;;
       --max-thermal) MAX_THERMAL=$2 ;;
-      --offline-grace) OFFLINE_GRACE=$2 ;;
       *) die "unknown option: $1" ;;
     esac
     shift 2
   done
   local n
-  for n in "$INTERVAL" "$QUIET" "$CPU" "$MIN_BATTERY" "$MAX_THERMAL" "$OFFLINE_GRACE"; do
+  for n in "$INTERVAL" "$QUIET" "$CPU" "$MIN_BATTERY" "$MAX_THERMAL"; do
     [[ $n =~ ^[0-9]+$ ]] || die "expected a whole number, got '$n'"
   done
   [[ $MAX_HOURS =~ ^[0-9]+(\.[0-9]+)?$ ]] || die "--max-hours expects a number, got '$MAX_HOURS'"
@@ -134,9 +137,10 @@ sleep_now() {
   pmset sleepnow >/dev/null
 }
 
+# `route get` exits 0 even when there is no default route; it just prints none.
 has_route() {
   if [ -n "${SWD_FAKE:-}" ]; then [ "$(fake online)" != no ]; return; fi
-  route -n get default >/dev/null 2>&1
+  route -n get default 2>/dev/null | grep -q 'interface:'
 }
 
 # Real internet, not just a Wi-Fi association: dead links and captive portals fail.
@@ -145,32 +149,10 @@ online() {
   has_route && curl -fsS -m 4 http://captive.apple.com/hotspot-detect.html 2>/dev/null | grep -q Success
 }
 
-wifi_device() {
-  networksetup -listallhardwareports 2>/dev/null | awk '/^Hardware Port: (Wi-Fi|AirPort)/ { getline; print $2; exit }'
-}
-
-# Wi-Fi networks this Mac has saved, one per line.
-known_networks() {
-  if [ -n "${SWD_FAKE:-}" ]; then fake known; return 0; fi
-  local dev
-  dev=$(wifi_device)
-  [ -n "$dev" ] || return 0
-  networksetup -listpreferredwirelessnetworks "$dev" 2>/dev/null | sed -n 's/^[[:space:]]\{1,\}//p'
-}
-
-# Joins a saved network by name; macOS supplies the password from the keychain.
-join_network() {
-  if [ -n "${SWD_FAKE:-}" ]; then
-    echo "$1" >> "$SWD_FAKE/joined"
-    [ "$(fake join)" != fail ] || { JOIN_ERR="fake failure"; return 1; }
-    return 0
-  fi
-  local dev out
-  dev=$(wifi_device)
-  [ -n "$dev" ] || { JOIN_ERR="no Wi-Fi interface"; return 1; }
-  # networksetup exits 0 even when it fails; it only prints when something went wrong.
-  out=$(networksetup -setairportnetwork "$dev" "$1" 2>&1)
-  [ -z "$out" ] || { JOIN_ERR=$out; return 1; }
+# An iPhone's Personal Hotspot hands out 172.20.10.0/28 and routes through itself at .1.
+on_phone_hotspot() {
+  if [ -n "${SWD_FAKE:-}" ]; then [ "$(fake gateway)" = 172.20.10.1 ]; return; fi
+  route -n get default 2>/dev/null | grep -q 'gateway: 172\.20\.10\.1$'
 }
 
 is_paused() {
@@ -178,34 +160,6 @@ is_paused() {
   local until
   until=$(head -c 32 "$PAUSE_FILE" 2>/dev/null | tr -cd 0-9)
   [ -z "$until" ] || [ "$until" = 0 ] || [ "$until" -gt "$(date +%s)" ]
-}
-
-hotspot_name() {
-  local name
-  [ -f "$HOTSPOT_FILE" ] || return 1
-  name=$(head -n 1 "$HOTSPOT_FILE" 2>/dev/null)
-  [ -n "$name" ] && echo "$name"
-}
-
-owner_first_name() {
-  if [ -n "${SWD_FAKE:-}" ]; then fake owner; return 0; fi
-  id -F "${SUDO_USER:-$(id -un)}" 2>/dev/null | awk '{ print $1 }'
-}
-
-# The user's own phone among saved networks: an iPhone/iPad network named after
-# them ("Tony's iPhone"), or the only one there is.
-guess_hotspot() {
-  local phones first mine
-  phones=$(known_networks | grep -E 'iPhone|iPad')
-  [ -n "$phones" ] || return 1
-  first=$(owner_first_name)
-  if [ -n "$first" ]; then
-    mine=$(printf '%s\n' "$phones" |
-      awk -v f="$first" 'tolower(substr($0, 1, length(f))) == tolower(f) { print; exit }')
-    [ -n "$mine" ] && { echo "$mine"; return 0; }
-  fi
-  [ "$(printf '%s\n' "$phones" | wc -l | tr -d ' ')" = 1 ] && { echo "$phones"; return 0; }
-  return 1
 }
 
 # ---------------------------------------------------------------- sessions
@@ -287,32 +241,25 @@ evaluate() {
 
 # ---------------------------------------------------------------- daemon
 
-# Lid closed and still working. If the internet is gone, you probably took the
-# Mac with you: join the phone's hotspot so the sessions can keep going.
-hotspot_check() {
-  local ssid
-  ssid=$(hotspot_name) || return 0
-  # While online, checking every OFFLINE_GRACE seconds is plenty.
-  if [ "$offline_since" = 0 ] && [ $((now - last_probe)) -lt "$OFFLINE_GRACE" ] && has_route; then
+# Lid closed and still working. If the internet drops, you probably took the Mac
+# with you. Log it, and log how it came back, so the log shows whether macOS moved
+# the Mac onto the phone's hotspot. Switching networks is left to macOS (see the
+# top of this file).
+net_check() {
+  # While online, checking every NET_CHECK seconds is plenty.
+  if [ "$offline_since" = 0 ] && [ $((now - last_probe)) -lt "$NET_CHECK" ] && has_route; then
     return 0
   fi
   last_probe=$now
   if online; then
-    [ "$offline_since" = 0 ] || log "back online"
+    if [ "$offline_since" != 0 ]; then
+      if on_phone_hotspot; then log "back online after $(ago $((now - offline_since))), on a phone's hotspot"
+      else log "back online after $(ago $((now - offline_since)))"; fi
+    fi
     offline_since=0
-    return 0
-  fi
-  if [ "$offline_since" = 0 ]; then
+  elif [ "$offline_since" = 0 ]; then
     offline_since=$now
     log "lost the internet with the lid closed"
-  fi
-  [ $((now - offline_since)) -ge "$OFFLINE_GRACE" ] || return 0
-  [ $((now - last_join)) -ge $((OFFLINE_GRACE * 3)) ] || return 0
-  last_join=$now
-  if join_network "$ssid"; then
-    log "joined hotspot: $ssid"
-  else
-    log "couldn't join hotspot $ssid: $JOIN_ERR"
   fi
 }
 
@@ -366,7 +313,7 @@ tick() {
   last_lid=$lid
 
   if [ "$holding" = 1 ] && [ "$lid" = closed ]; then
-    hotspot_check
+    net_check
   else
     offline_since=0
   fi
@@ -401,7 +348,7 @@ cmd_daemon() {
   set_paths
   mkdir -p "$(dirname "$HOLD_MARKER")"
   holding=0; closed_since=0; last_lid=open; nap_pid=""
-  offline_since=0; last_probe=0; last_join=0
+  offline_since=0; last_probe=0
   [ -e "$HOLD_MARKER" ] && holding=1   # restarted while holding: re-check and release if idle
   trap on_exit EXIT
   trap 'exit 0' TERM INT HUP
@@ -447,7 +394,7 @@ cmd_status() {
     echo "Installed, but the daemon last checked in $(ago $((now - updated))) ago. Check: sleep-when-done log"
   elif [ "$holding" = 1 ] && [ "$lid" = closed ]; then
     echo "Lid closed, staying awake for $(ago $((now - closed_since))) so far. $why"
-    [ "$offline_since" = 0 ] || echo "  Offline for $(ago $((now - offline_since))), trying the hotspot."
+    [ "$offline_since" = 0 ] || echo "  Offline for $(ago $((now - offline_since)))."
   elif [ "$holding" = 1 ]; then
     echo "Armed. Close the lid and the Mac stays awake until this finishes, then sleeps."
     echo "  $why"
@@ -466,7 +413,7 @@ cmd_status() {
   fi
 
   evaluate
-  local st cpu name idle=0 hotspot
+  local st cpu name idle=0
   echo
   echo "Sessions"
   while IFS=$'\t' read -r st cpu name; do
@@ -480,12 +427,8 @@ cmd_status() {
   done <<< "$SESSIONS"
   echo "  $idle idle"
   echo
-  if hotspot=$(hotspot_name); then
-    echo "Hotspot fallback: $hotspot (joined if the internet drops while the lid is closed)"
-  else
-    echo "Hotspot fallback: off. Turn it on with: sleep-when-done hotspot auto"
-  fi
   echo "With the lid closed it gives up and sleeps after ${max_hours}h, at ${min_battery}% battery, or if the Mac gets dangerously hot."
+  echo "Leaving Wi-Fi? Switching to your iPhone's hotspot is up to macOS. See: sleep-when-done hotspot"
 }
 
 cmd_disable() {
@@ -514,46 +457,22 @@ cmd_enable() {
   echo "Enabled. Closing the lid waits for running Claude sessions to finish, then sleeps."
 }
 
-save_hotspot() {
-  mkdir -p "$CONFIG_DIR"
-  printf '%s\n' "$1" > "$HOTSPOT_FILE"
-  echo "Hotspot fallback: $1"
-  if ! known_networks | grep -qxF "$1"; then
-    echo "Note: this Mac hasn't saved \"$1\" yet. Join it once from the Wi-Fi menu so macOS has its password."
-  fi
-}
-
 cmd_hotspot() {
-  set_paths
-  local name phones
-  case ${1:-} in
-    "")
-      if name=$(hotspot_name); then echo "Hotspot fallback: $name"
-      else echo "Hotspot fallback: off"; fi
-      echo "If the internet drops while the lid is closed and sessions are still working, it joins this network."
-      phones=$(known_networks | grep -E 'iPhone|iPad')
-      if [ -n "$phones" ]; then
-        echo
-        echo "Phone hotspots this Mac has saved:"
-        printf '%s\n' "$phones" | sed 's/^/  /'
-      fi
-      echo
-      echo "Set it:  sleep-when-done hotspot auto   or   sleep-when-done hotspot \"Network name\""
-      echo "Turn it off:  sleep-when-done hotspot off"
-      ;;
-    off)
-      rm -f "$HOTSPOT_FILE"
-      echo "Hotspot fallback off."
-      ;;
-    auto)
-      name=$(guess_hotspot) ||
-        die "couldn't tell which saved network is your phone. Name it: sleep-when-done hotspot \"Network name\""
-      save_hotspot "$name"
-      ;;
-    *)
-      save_hotspot "$1"
-      ;;
-  esac
+  cat <<'EOF'
+sleep-when-done can't move the Mac onto your phone's hotspot. macOS only lets its own
+Wi-Fi code wake an iPhone's hotspot, and networksetup won't join a saved network unless
+it's given the password, even as root.
+
+macOS can switch by itself once the Mac has left every saved Wi-Fi network, but only
+while the Mac is awake. Keeping it awake is sleep-when-done's part. To let macOS do the rest:
+  Mac:     System Settings → Wi-Fi → Ask to join hotspots → Automatic
+  iPhone:  signed in to the same Apple Account as the Mac, or in your Family Sharing group
+
+This doesn't cover Wi-Fi that stays connected but loses its internet. macOS asks before
+switching then, and nobody is there to answer. It also isn't confirmed yet that macOS
+switches with the lid closed. After a trip, check: sleep-when-done log
+("lost the internet with the lid closed", then "back online ..., on a phone's hotspot").
+EOF
 }
 
 cmd_log() {
@@ -593,8 +512,7 @@ cmd_install() {
   <array>
 EOF
     for a in "$LIBEXEC" daemon --home "$USER_HOME" --interval "$INTERVAL" --quiet "$QUIET" --cpu "$CPU" \
-             --max-hours "$MAX_HOURS" --min-battery "$MIN_BATTERY" --max-thermal "$MAX_THERMAL" \
-             --offline-grace "$OFFLINE_GRACE"; do
+             --max-hours "$MAX_HOURS" --min-battery "$MIN_BATTERY" --max-thermal "$MAX_THERMAL"; do
       printf '    <string>%s</string>\n' "$(xml_escape "$a")"
     done
     cat <<EOF
@@ -618,22 +536,13 @@ EOF
     sleep 1
   done
 
-  # First install: point the hotspot fallback at the user's own phone if it's obvious.
-  local hotspot
-  if ! hotspot_name >/dev/null && hotspot=$(guess_hotspot); then
-    mkdir -p "$CONFIG_DIR"
-    printf '%s\n' "$hotspot" > "$HOTSPOT_FILE"
-    chown -R "$user" "$CONFIG_DIR"
-  fi
+  # Earlier versions saved a hotspot name here and tried to join it themselves.
+  rm -f "$CONFIG_DIR/hotspot"
 
   echo "Installed. Watching Claude Code sessions for $user."
   echo "Closing the lid now waits for running sessions to finish, then sleeps"
   echo "(gives up after ${MAX_HOURS}h, at ${MIN_BATTERY}% battery, or if the Mac gets dangerously hot)."
-  if hotspot=$(hotspot_name); then
-    echo "Hotspot fallback: $hotspot. Change it with: sleep-when-done hotspot"
-  else
-    echo "Hotspot fallback: off. Turn it on with: sleep-when-done hotspot auto"
-  fi
+  echo "Taking it away from Wi-Fi? See: sleep-when-done hotspot"
   echo "Check it any time with:  sleep-when-done status"
 }
 
@@ -659,7 +568,7 @@ case $cmd in
   status) cmd_status ;;
   enable|resume) cmd_enable ;;
   disable|pause) cmd_disable "$@" ;;
-  hotspot) cmd_hotspot "$@" ;;
+  hotspot) cmd_hotspot ;;
   log) cmd_log "$@" ;;
   install) cmd_install "$@" ;;
   uninstall) cmd_uninstall ;;
