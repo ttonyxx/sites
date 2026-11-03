@@ -217,6 +217,33 @@ recent_activity() {
   echo "${name:-$sid}"
 }
 
+# Sessions whose last reply since epoch $1 was an API error rather than a real
+# finish, e.g. the internet dropped and Claude Code gave up retrying. One per line:
+#   Name (Can't reach the API server — check your internet or DNS (ENOTFOUND))
+api_error_stops() {
+  local since_iso f info sid name t last ts kind text
+  since_iso=$(date -u -r "$1" '+%Y-%m-%dT%H:%M:%S')
+  for f in "$SESSIONS_DIR"/*.json; do
+    [ -f "$f" ] || continue
+    info=$(jq -r '[.sessionId // "", .name // (.cwd // "?" | split("/") | last)] | @tsv' "$f" 2>/dev/null)
+    IFS=$'\t' read -r sid name <<< "$info"
+    [ -n "$sid" ] || continue
+    t=$(ls "$PROJECTS_DIR"/*/"$sid".jsonl 2>/dev/null | head -n 1)
+    [ -n "$t" ] && [ "$(stat -f %m "$t")" -ge "$1" ] || continue
+    # The last reply can sit hundreds of bookkeeping lines from the end, so read
+    # backwards to it. Quotes inside message text are escaped, so this pattern
+    # only matches a line's own type.
+    last=$(tail -r "$t" | grep -m 1 '"type":"assistant"' | jq -r 'select(.type == "assistant")
+      | [.timestamp // "", (if .isApiErrorMessage then "error" else "ok" end),
+         (.message.content // [] | if type == "array" then map(.text // empty) | join(" ") else tostring end)]
+      | @tsv' 2>/dev/null)
+    IFS=$'\t' read -r ts kind text <<< "$last"
+    [ "$kind" = error ] && [[ $ts > $since_iso ]] || continue
+    text=${text#API Error: }
+    echo "$name (${text:0:90})"
+  done
+}
+
 # Sets WORK (1 if anything is running), WHY, and SESSIONS (the scan).
 evaluate() {
   local st cpu name busy="" bg="" waiting=0 active
@@ -264,7 +291,7 @@ net_check() {
 }
 
 tick() {
-  local now want lid=open paused=0 power src pct level
+  local now want lid=open paused=0 power src pct level cut
   now=$(date +%s)
   evaluate
   want=$WORK
@@ -294,11 +321,17 @@ tick() {
 
   if [ "$want" = 1 ] && [ "$holding" = 0 ]; then
     if set_disablesleep 1; then
-      holding=1; : > "$HOLD_MARKER"
+      holding=1; hold_since=$now; : > "$HOLD_MARKER"
       log "holding: $WHY"
     fi
   elif [ "$want" = 0 ] && [ "$holding" = 1 ]; then
     set_disablesleep 0; holding=0; rm -f "$HOLD_MARKER"
+    if [ "$WORK" = 0 ] && [ "$paused" = 0 ]; then
+      # Nothing running can also mean a session gave up on an error (say the
+      # internet dropped). Say so, so the log doesn't read like finished work.
+      cut=$(api_error_stops "$hold_since" | paste -sd ';' - | sed 's/;/; /g')
+      [ -z "$cut" ] || WHY="$WHY. Not finished, stopped on an API error: $cut"
+    fi
     if [ "$lid" != closed ]; then
       log "released: $WHY"
     elif external_display; then
@@ -348,8 +381,9 @@ cmd_daemon() {
   set_paths
   mkdir -p "$(dirname "$HOLD_MARKER")"
   holding=0; closed_since=0; last_lid=open; nap_pid=""
-  offline_since=0; last_probe=0
-  [ -e "$HOLD_MARKER" ] && holding=1   # restarted while holding: re-check and release if idle
+  offline_since=0; last_probe=0; hold_since=0
+  # Restarted while holding: re-check, and release if idle.
+  [ -e "$HOLD_MARKER" ] && { holding=1; hold_since=$(date +%s); }
   trap on_exit EXIT
   trap 'exit 0' TERM INT HUP
   log "started: watching $SESSIONS_DIR (max ${MAX_HOURS}h lid-closed, min battery ${MIN_BATTERY}%)"

@@ -38,6 +38,10 @@ A root LaunchDaemon checks those files every 5 seconds:
 
 A session `waiting` for input doesn't count.
 
+When it lets the Mac sleep because nothing is running, it checks each session's last reply. If that
+reply was an API error (say the internet dropped and Claude Code gave up retrying), the log names
+the session and the error, so a cut-off session doesn't read like finished work.
+
 The Mac only stays awake with the lid closed if the work was already running when the lid
 closed. It never sleeps the Mac while an external display is attached. With the lid closed,
 it gives up and sleeps after 3h, at 10% battery, or at "trapping" thermal pressure. That is macOS's

@@ -205,5 +205,38 @@ out=$(cli hotspot)
 case $out in *"can't move the Mac"*"Ask to join hotspots → Automatic"*) pass "hotspot explains that macOS has to do the switching" ;;
   *) fail "hotspot explains that macOS has to do the switching"; echo "$out" ;; esac
 
+echo "work cut off by an API error"
+# reply ID TEXT [error]: append an assistant reply to session ID's transcript.
+reply() {
+  jq -nc --arg ts "$(date -u '+%Y-%m-%dT%H:%M:%S.000Z')" --arg text "$2" --arg err "${3:-}" \
+    '{type: "assistant", timestamp: $ts, message: {content: [{type: "text", text: $text}]}}
+     + (if $err == "" then {} else {isApiErrorMessage: true, error: "server_error"} end)' \
+    >> "$HOME_DIR/.claude/projects/proj/sid-$1.jsonl"
+}
+last_release() { grep 'released:' "$FAKE/log" | tail -n 1; }
+set_fake online yes
+set_fake lid open
+session "$D" busy "Session D"
+start_daemon
+expect "busy session holds" holding
+reply "$D" "API Error: Can't reach the API server — check your internet or DNS (ENOTFOUND)" error
+session "$D" idle "Session D"
+expect "a session that gave up on an API error releases" released
+case $(last_release) in
+  *"Not finished, stopped on an API error: Session D (Can't reach the API server"*)
+    pass "...and the log says it stopped on an API error, not that it finished" ;;
+  *) fail "...and the log says it stopped on an API error, not that it finished"; last_release ;;
+esac
+session "$D" busy "Session D"
+expect "busy again holds" holding
+reply "$D" "All done: the profile tab now has three layouts."
+session "$D" idle "Session D"
+expect "a session that really finished releases" released
+case $(last_release) in
+  *"API error"*) fail "...and an ordinary finish isn't reported as an error"; last_release ;;
+  *) pass "...and an ordinary finish isn't reported as an error" ;;
+esac
+stop_daemon
+
 echo
 if [ "$fails" = 0 ]; then echo "all passed"; else echo "$fails failed"; echo "--- log"; cat "$FAKE/log"; exit 1; fi

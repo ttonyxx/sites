@@ -121,6 +121,8 @@ None of these need `sudo`, except uninstall and install.
   - An idle session whose child processes use 25% CPU or more, such as a build it left running.
   - Any transcript written in the last 90 seconds.
 - **Doesn't count:** a session waiting for the user's answer, since nobody is there to answer it.
+- **Cut off, not finished:** if a session's last reply was an API error (for example the internet
+  dropped), the log says "Not finished, stopped on an API error: <session> (<error>)".
 - **Only work already running when the lid closes counts.** If something starts after the lid
   is closed, it won't keep the Mac awake.
 - **Safety limits:** with the lid closed, it gives up and sleeps the Mac after 3 hours, at 10%
