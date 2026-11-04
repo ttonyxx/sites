@@ -22,6 +22,24 @@
     };
   }
   const median = (a) => { const s = [...a].sort((x, y) => x - y); return s.length ? s[Math.floor(s.length / 2)] : null; };
+
+  // iPhone home-screen apps installed while the status bar was translucent draw under the clock but
+  // size the viewport as if the status bar were missing, so everything anchored to the bottom stops
+  // short and leaves an empty band. Measure that band and let the fixed layers extend into it.
+  function fixStandaloneGap() {
+    const probe = document.createElement("div");
+    probe.style.cssText = "position:fixed;top:0;left:0;width:1px;height:env(safe-area-inset-top);visibility:hidden;pointer-events:none";
+    document.body.appendChild(probe);
+    const safeTop = probe.offsetHeight;
+    probe.remove();
+    const portrait = innerHeight >= innerWidth;
+    const full = portrait ? Math.max(screen.width, screen.height) : Math.min(screen.width, screen.height);
+    const gap = navigator.standalone === true && safeTop > 0 ? Math.round(full - innerHeight) : 0;
+    document.documentElement.style.setProperty("--ios-gap", gap > 0 && gap < 120 ? `${gap}px` : "0px");
+  }
+  fixStandaloneGap();
+  addEventListener("resize", () => setTimeout(fixStandaloneGap, 120));
+  addEventListener("orientationchange", () => setTimeout(fixStandaloneGap, 300));
   const plural = (n, w) => `${n.toLocaleString()} ${w}${n === 1 ? "" : "s"}`;
 
   const BUCKETS = [
