@@ -25,6 +25,11 @@ SEARCH_M = 16  # the traced rock must sit within this distance of Mountain Proje
 SERVICE = "https://imagery.nationalmap.gov/arcgis/rest/services/USGSNAIPPlus/ImageServer/exportImage"
 
 
+def origin(b):
+    """Chips are centered on Mountain Project's GPS point (kept as mp_gps once a boulder is traced)."""
+    return b.get("mp_gps") or [b["lat"], b["lon"]]
+
+
 def bbox(lat, lon):
     dlat = R_M / 111320
     dlon = R_M / (111320 * math.cos(math.radians(lat)))
@@ -37,7 +42,7 @@ def fetch(region, chips):
         out = os.path.join(chips, f"{b['id']}.png")
         if os.path.exists(out):
             continue
-        w, s, e, n = bbox(b["lat"], b["lon"])
+        w, s, e, n = bbox(*origin(b))
         q = urllib.parse.urlencode({"bbox": f"{w},{s},{e},{n}", "bboxSR": 4326, "imageSR": 4326,
                                     "size": f"{PX},{PX}", "format": "png", "f": "image"})
         for attempt in range(4):
@@ -123,10 +128,28 @@ def trace_one(img, b):
     c = measure.approximate_polygon(c, tolerance=0.9)
     if len(c) < 5:
         return None
-    w, s, e, n_ = bbox(b["lat"], b["lon"])
+    w, s, e, n_ = bbox(*origin(b))
     ring_ll = [[round(n_ - (r / PX) * (n_ - s), 6), round(w + (col / PX) * (e - w), 6)] for r, col in c]
     return {"ring": ring_ll, "area_m2": round(float(keep.sum() * M_PER_PX ** 2), 1), "offset_m": round(d, 1),
             "shade": round(float(shade), 2), "solidity": round(float(solidity), 2), "src": "naip", "px": c.tolist()}
+
+
+def plausible(r, height_ft):
+    """Keep a trace only if it could be this boulder: big enough for its tallest listed problem
+    (a 15 ft problem needs a rock several meters across), not absurdly big, and close to the GPS point."""
+    h = (height_ft or 12) * 0.3048
+    area = r["area_m2"]
+    if area < max(20.0, 1.6 * (0.5 * h) ** 2):
+        return False  # tiny traces are usually a lit patch or a neighbouring rock, not the boulder
+    ring = r["ring"]
+    lat0 = sum(p[0] for p in ring) / len(ring)
+    pts = [((p[1]) * 111320 * math.cos(math.radians(lat0)), p[0] * 111320) for p in ring]
+    perim = sum(math.dist(pts[i], pts[(i + 1) % len(pts)]) for i in range(len(pts)))
+    if perim * perim / (4 * math.pi * area) > 2.6:
+        return False  # long thin slivers are edges or shadows, not boulders
+    if area > 3.14 * (3.5 * h) ** 2:
+        return False
+    return r["offset_m"] <= max(8.0, 0.8 * math.sqrt(area))
 
 
 def _hull_area(pts):
@@ -144,12 +167,19 @@ def trace(region, chips, out, sheet=None):
     from PIL import Image, ImageDraw
 
     res, tiles = {}, []
+    heights = {}
+    for pr in region["problems"]:
+        h = pr.get("height_ft")
+        if h and 3 < h < 60:
+            heights[pr["boulder"]] = max(heights.get(pr["boulder"], 0), h)
     for b in region["boulders"]:
         p = os.path.join(chips, f"{b['id']}.png")
         if not os.path.exists(p):
             continue
         img = np.array(Image.open(p).convert("RGB"))
         r = trace_one(img, b)
+        if r and not plausible(r, heights.get(b["id"])):
+            r = None
         if r:
             res[str(b["id"])] = {k: v for k, v in r.items() if k != "px"}
         if sheet:
@@ -160,6 +190,25 @@ def trace(region, chips, out, sheet=None):
                 dr.line([(x / 2, y / 2) for y, x in r["px"]] + [(r["px"][0][1] / 2, r["px"][0][0] / 2)], fill=(255, 220, 0), width=2)
             dr.text((3, 2), b["name"][:22], fill=(255, 255, 255))
             tiles.append(im)
+    # Two Mountain Project boulders can trace the same rock (neighbours with nearby GPS points).
+    # Keep the trace for the boulder whose GPS point is closest; the other keeps its estimated shape.
+    def centroid(r):
+        ring = r["ring"]
+        return (sum(p[0] for p in ring) / len(ring), sum(p[1] for p in ring) / len(ring))
+    ids = sorted(res, key=lambda k: res[k]["offset_m"])
+    kept = {}
+    for k in ids:
+        c = centroid(res[k])
+        clash = False
+        for k2, r2 in kept.items():
+            c2 = centroid(r2)
+            d = math.hypot((c[0] - c2[0]) * 111320, (c[1] - c2[1]) * 111320 * math.cos(math.radians(c[0])))
+            if d < 0.6 * math.sqrt(min(res[k]["area_m2"], r2["area_m2"])):
+                clash = True
+                break
+        if not clash:
+            kept[k] = res[k]
+    res = kept
     json.dump(res, open(out, "w"))
     print(f"traced {len(res)} of {len(region['boulders'])} boulders", flush=True)
     if sheet and tiles:

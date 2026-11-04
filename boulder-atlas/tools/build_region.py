@@ -296,8 +296,13 @@ for b in boulders:
         b["approx"] = True
     o = outlines.get(str(b["id"]))
     if o:
+        # The traced rock is where the boulder really is: move the point there (it drives pins,
+        # distances and directions), keeping Mountain Project's original GPS for reference.
         b["outline"] = o["ring"]
         b["outline_src"] = o.get("src", "satellite")
+        b["mp_gps"] = [b["lat"], b["lon"]]
+        b["lat"] = round(sum(p[0] for p in o["ring"]) / len(o["ring"]), 6)
+        b["lon"] = round(sum(p[1] for p in o["ring"]) / len(o["ring"]), 6)
 
 # Areas: center, bounds and counts.
 for aid, a in areas.items():
