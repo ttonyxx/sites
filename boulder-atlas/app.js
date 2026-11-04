@@ -46,6 +46,10 @@
     dl: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v11m-5-5 5 5 5-5M5 20h14" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
     done: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12.5 4.5 4.5L19 7.5" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
     play: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14l11-7z" fill="currentColor"/></svg>`,
+    list: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6h11M9 12h11M9 18h11" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/><circle cx="4.5" cy="6" r="1.6" fill="currentColor"/><circle cx="4.5" cy="12" r="1.6" fill="currentColor"/><circle cx="4.5" cy="18" r="1.6" fill="currentColor"/></svg>`,
+    plus: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></svg>`,
+    share: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15V3m-4 4 4-4 4 4M5 12v8h14v-8" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
+    map: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 4 3 6v14l6-2 6 2 6-2V4l-6 2zM9 4v14M15 6v14" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>`,
   };
 
   // geo
@@ -85,11 +89,67 @@
     me: null,
     heading: null,
     user: null,
+    listView: null, // { id } for one of your lists, or { shared: { name, pids } } for a shared link
+    listBoulders: null, // boulders of the open list (the map dims everything else)
   };
   // Saved climbs: problem id -> time saved. Synced to the account when signed in (auth.js).
   const saved = new Map(Object.entries(store.get("saved", {})).map(([k, v]) => [+k, v]));
   const downloaded = new Set(store.get("downloaded", []));
   const bus = new EventTarget();
+
+  // Lists. "Saved" (the `saved` map above) is the default list; these are your own.
+  // id -> { name, items: {problemId: addedAt}, updated }
+  const LIST_SAVED = "saved";
+  const lists = new Map(Object.entries(store.get("lists", {})).filter(([, v]) => v && v.name));
+  const persistLists = () => store.set("lists", Object.fromEntries(lists));
+  const listName = (id) => (id === LIST_SAVED ? "Saved" : lists.get(id)?.name ?? "List");
+  function listPids(id) {
+    const ids = id === LIST_SAVED ? [...saved.keys()] : Object.keys(lists.get(id)?.items || {}).map(Number);
+    return ids.filter((p) => P[p]);
+  }
+  const inList = (id, pid) => (id === LIST_SAVED ? saved.has(pid) : !!lists.get(id)?.items?.[pid]);
+  const emitList = (id) => bus.dispatchEvent(new CustomEvent("lists", { detail: { id, data: lists.get(id) || null } }));
+  function createList(name, pids = []) {
+    const id = "l" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+    const now = Date.now();
+    lists.set(id, { name: name.trim().slice(0, 60) || "My list", items: Object.fromEntries(pids.map((p) => [p, now])), updated: now });
+    persistLists();
+    emitList(id);
+    refreshSavedUI();
+    return id;
+  }
+  function setInList(id, pid, on) {
+    if (id === LIST_SAVED) return setSaved(pid, on);
+    const l = lists.get(id);
+    if (!l) return;
+    if (on) l.items[pid] = l.items[pid] || Date.now();
+    else delete l.items[pid];
+    l.updated = Date.now();
+    persistLists();
+    emitList(id);
+    refreshSavedUI();
+  }
+  function renameList(id, name) {
+    const l = lists.get(id);
+    if (!l || !name.trim()) return;
+    l.name = name.trim().slice(0, 60);
+    l.updated = Date.now();
+    persistLists();
+    emitList(id);
+    refreshSavedUI();
+  }
+  function deleteList(id) {
+    lists.delete(id);
+    persistLists();
+    emitList(id);
+    refreshSavedUI();
+  }
+  function replaceLists(map) {
+    lists.clear();
+    for (const [k, v] of Object.entries(map || {})) if (v && v.name) lists.set(k, { name: v.name, items: v.items || {}, updated: v.updated || 0 });
+    persistLists();
+    refreshSavedUI();
+  }
 
   function setSaved(pid, on, { silent = false } = {}) {
     if (on) saved.set(pid, saved.get(pid) || Date.now());
@@ -105,9 +165,19 @@
     refreshSavedUI();
   }
   function refreshSavedUI() {
-    $("#n-saved").textContent = saved.size || "";
-    if (state.tab === "saved") renderList();
-    if (state.sel) $$("#detail [data-act=save]").forEach((b) => paintSave(b, +b.dataset.pid));
+    $("#n-lists").textContent = lists.size + 1;
+    if (state.listView) renderListPane();
+    else if (state.tab === "lists") renderList();
+    if (state.sel) {
+      $$("#detail [data-act=save]").forEach((b) => paintSave(b, +b.dataset.pid));
+      $$("#detail [data-act=addlist]").forEach((b) => paintAddList(b, +b.dataset.pid));
+    }
+    if (!$("#picker").hidden && pickerMode === "add") renderPicker();
+  }
+  function paintAddList(btn, pid) {
+    const n = [...lists.keys()].filter((id) => inList(id, pid)).length;
+    btn.classList.toggle("on", n > 0);
+    btn.innerHTML = `${ICON.list}<span>${n ? `In ${plural(n, "list")}` : "Add to list"}</span>`;
   }
   function paintSave(btn, pid) {
     const on = saved.has(pid);
@@ -319,7 +389,7 @@
     satLayer = L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", {
       maxNativeZoom: 19, maxZoom: 21, attribution: "Imagery © Esri, Maxar, Earthstar Geographics",
     });
-    [["paths", 405], ["boulders", 420], ["dots", 610], ["labels", 620], ["areas", 630], ["me", 640]].forEach(([n, z]) => {
+    [["paths", 405], ["boulders", 420], ["dots", 610], ["labels", 620], ["areas", 630], ["pins", 635], ["me", 640]].forEach(([n, z]) => {
       map.createPane(n).style.zIndex = z;
     });
     map.getPane("labels").style.pointerEvents = "none";
@@ -474,7 +544,7 @@
 
   function highlight() {
     if (!map) return;
-    const vis = new Set(filteredBoulders().map((x) => x.b.id));
+    const vis = state.listBoulders || new Set(filteredBoulders().map((x) => x.b.id));
     for (const b of REG.boulders) {
       const dim = !vis.has(b.id), sel = b.id === state.sel;
       polys[b.id].setStyle(polyStyle(b.id, dim));
@@ -658,8 +728,8 @@
     const nP = filteredProblems(), nB = filteredBoulders();
     $("#n-problems").textContent = nP.length.toLocaleString();
     $("#n-boulders").textContent = nB.length.toLocaleString();
-    $("#n-saved").textContent = saved.size || "";
-    $("#filters").hidden = state.tab === "saved";
+    $("#n-lists").textContent = lists.size + 1;
+    $("#filters").hidden = state.tab === "lists";
     if (state.tab === "problems") {
       nP.sort(problemSorts()[sort]);
       html = nP.map(problemRow).join("") || `<li class="empty">No problems match. Try clearing filters.</li>`;
@@ -680,15 +750,19 @@
         return `<li><button class="item" data-go="b/${b.id}"><span class="thumb">${boulderSVG(b, { mini: true })}</span><span class="main"><span class="name">${esc(b.name)}</span><span class="meta">${ps.length < all.length ? `${ps.length} of ` : ""}${plural(all.length, "problem")} · ${esc(range)} · ${esc(state.area === "all" ? A[b.area]?.name : b.sector)}</span></span>${distCell(b)}</button></li>`;
       }).join("") || `<li class="empty">No boulders match.</li>`;
     } else {
-      const toks = tokens();
-      const ps = [...saved.keys()].map((id) => P[id]).filter((p) => p && textMatch(p, toks));
-      ps.sort(problemSorts()[state.sort === "near" && state.me ? "near" : "recent"]);
-      const nDl = ps.filter((p) => downloaded.has(p.id)).length;
-      html = `<li class="savedhead">
-          <div>${saved.size ? `<b>${plural(saved.size, "saved climb")}</b> · ${nDl === ps.length && ps.length ? "all downloaded for offline" : `${nDl} downloaded`}` : "<b>No saved climbs yet.</b> Tap <i>Save</i> on any problem to keep it here."}</div>
-          ${ps.length && nDl < ps.length ? `<button class="pill" data-act="dl-saved">${ICON.dl}<span>Download all</span></button>` : ""}
-          ${state.user ? `<div class="sync">Synced to ${esc(state.user.email || state.user.name)}</div>` : window.AtlasAuth ? `<div class="sync"><button class="link" data-act="signin">Sign in with Google</button> to keep saved climbs on every device.</div>` : ""}
-        </li>` + ps.map(problemRow).join("");
+      const ids = [LIST_SAVED, ...[...lists.keys()].sort((a, b) => (lists.get(b).updated || 0) - (lists.get(a).updated || 0))];
+      html = `<li class="lhead"><div><b>Your lists</b><span class="muted">Open a list to see its boulders on the map.</span></div><button class="pill" data-act="new-list">${ICON.plus}<span>New list</span></button></li>` +
+        ids.map((id) => {
+          const pids = listPids(id);
+          const areas = [...new Set(pids.map((p) => A[B[P[p].boulder].area]?.name).filter(Boolean))];
+          const nB = new Set(pids.map((p) => P[p].boulder)).size;
+          const allDl = pids.length && pids.every((p) => downloaded.has(p));
+          const meta = pids.length
+            ? `${plural(pids.length, "climb")} on ${plural(nB, "boulder")}${areas.length ? ` · ${esc(areas.slice(0, 2).join(", "))}${areas.length > 2 ? "…" : ""}` : ""}`
+            : id === LIST_SAVED ? "Tap Save on any problem to add it here" : "Empty: add climbs from any problem";
+          return `<li><button class="item" data-go="list/${id}"><span class="licon${id === LIST_SAVED ? " saved" : ""}">${id === LIST_SAVED ? ICON.saved : ICON.list}</span><span class="main"><span class="name">${esc(listName(id))}${allDl ? `<span class="mark dl" title="Downloaded">${ICON.done}</span>` : ""}</span><span class="meta">${meta}</span></span><span class="chev" aria-hidden="true">›</span></button></li>`;
+        }).join("") +
+        `<li class="savedhead"><div class="sync">${state.user ? `Your lists sync to ${esc(state.user.email || state.user.name)}.` : window.AtlasAuth ? `<button class="link" data-act="signin">Sign in with Google</button> to keep your lists on every device.` : "Lists are kept on this device."} Sharing a list creates a link anyone can open, no account needed.</div></li>`;
     }
     list.innerHTML = html;
     highlight();
@@ -788,8 +862,9 @@
               <div class="more">
                 <div class="acts">
                   <button class="pill" data-act="save" data-pid="${p.id}"></button>
+                  <button class="pill" data-act="addlist" data-pid="${p.id}"></button>
                   <button class="pill" data-act="dl" data-pid="${p.id}"></button>
-                  ${navigator.share ? `<button class="pill" data-act="share" data-pid="${p.id}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15V3m-4 4 4-4 4 4M5 12v8h14v-8" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Share</span></button>` : ""}
+                  ${navigator.share ? `<button class="pill" data-act="share" data-pid="${p.id}">${ICON.share}<span>Share</span></button>` : ""}
                 </div>
                 ${p.where ? `<p><b>Where:</b> ${esc(p.where)}</p>` : ""}
                 ${p.fa ? `<p><b>FA:</b> ${esc(p.fa)}</p>` : ""}
@@ -802,6 +877,7 @@
       </div>`;
     $$("#detail [data-act=save]").forEach((btn) => paintSave(btn, +btn.dataset.pid));
     $$("#detail [data-act=dl]").forEach((btn) => paintDl(btn, +btn.dataset.pid));
+    $$("#detail [data-act=addlist]").forEach((btn) => paintAddList(btn, +btn.dataset.pid));
     updateWhere();
   }
 
@@ -931,6 +1007,169 @@
     persistStorage();
   }
 
+  // ------------------------------------------------------------------ list view: a list on the map
+  // Climbs are grouped by boulder; boulders are ordered area by area as a nearest-neighbour walk, so
+  // the numbered pins read like a circuit.
+  let pinLayer = null;
+  const currentListPids = () => (state.listView?.shared ? state.listView.shared.pids.filter((p) => P[p]) : listPids(state.listView?.id));
+  function listOrder(pids) {
+    const byB = new Map();
+    for (const pid of pids) {
+      const p = P[pid];
+      if (!p) continue;
+      if (!byB.has(p.boulder)) byB.set(p.boulder, []);
+      byB.get(p.boulder).push(p);
+    }
+    const areaRank = Object.fromEntries(REG.areas.map((a, i) => [a.id, i]));
+    const groups = new Map();
+    for (const bid of byB.keys()) {
+      const b = B[bid];
+      if (!groups.has(b.area)) groups.set(b.area, []);
+      groups.get(b.area).push(b);
+    }
+    const out = [];
+    for (const aid of [...groups.keys()].sort((x, y) => areaRank[x] - areaRank[y])) {
+      let rest = groups.get(aid);
+      let cur = state.me ? rest.reduce((m, b) => (distM(state.me, b) < distM(state.me, m) ? b : m)) : rest.reduce((m, b) => (b.lat > m.lat ? b : m));
+      while (rest.length) {
+        out.push(cur);
+        const from = cur;
+        rest = rest.filter((b) => b !== from);
+        if (!rest.length) break;
+        cur = rest.reduce((m, b) => (distM(from, b) < distM(from, m) ? b : m));
+      }
+    }
+    return out.map((b) => ({ b, ps: byB.get(b.id).sort((x, y) => x.order - y.order) }));
+  }
+  function drawListPins(groups) {
+    if (pinLayer) pinLayer.remove();
+    pinLayer = L.layerGroup();
+    groups.forEach((g, i) => {
+      L.marker([g.b.lat, g.b.lon], {
+        pane: "pins", keyboard: false, title: g.b.name,
+        icon: L.divIcon({ className: "lpin", iconSize: [0, 0], html: `<button type="button" aria-label="${i + 1}. ${esc(g.b.name)}"><b>${i + 1}</b>${g.ps.length > 1 ? `<i>×${g.ps.length}</i>` : ""}</button>` }),
+      }).on("click", () => go(g.ps.length === 1 ? `p/${g.ps[0].id}` : `b/${g.b.id}`)).addTo(pinLayer);
+    });
+    pinLayer.addTo(map);
+    mapEl.classList.add("listmode");
+    state.listBoulders = new Set(groups.map((g) => g.b.id));
+    highlight();
+  }
+  function fitList(groups) {
+    if (!groups.length) return;
+    map.fitBounds(L.latLngBounds(groups.map((g) => [g.b.lat, g.b.lon])), { paddingTopLeft: padTL(), paddingBottomRight: padBR(), maxZoom: 18.5 });
+  }
+  function clearListMode() {
+    if (pinLayer) { pinLayer.remove(); pinLayer = null; }
+    mapEl.classList.remove("listmode");
+    state.listView = null;
+    state.listBoulders = null;
+    $("#listpane").hidden = true;
+  }
+  function renderListPane() {
+    const v = state.listView;
+    if (!v) return;
+    const shared = !!v.shared;
+    const own = !shared && v.id !== LIST_SAVED;
+    const name = shared ? v.shared.name : listName(v.id);
+    const pids = currentListPids();
+    const groups = listOrder(pids);
+    const nDl = pids.filter((p) => downloaded.has(p)).length;
+    const areas = [...new Set(groups.map((g) => A[g.b.area]?.name).filter(Boolean))];
+    $("#listpane").innerHTML = `
+      <div class="dhead">
+        <div class="dtop">
+          <button class="back" data-act="lists-back" aria-label="Back to lists"><svg viewBox="0 0 24 24"><path d="m15 5-7 7 7 7" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>Lists</button>
+          <h2>${esc(name)}</h2>
+        </div>
+        <div class="dsub">${shared ? "Shared with you · " : ""}${plural(pids.length, "climb")} on ${plural(groups.length, "boulder")}${areas.length ? ` · ${esc(areas.join(", "))}` : ""}</div>
+        <div class="acts lacts">
+          ${shared ? `<button class="pill solid" data-act="keep-shared">${ICON.plus}<span>Save to my lists</span></button>` : ""}
+          ${groups.length ? `<button class="pill" data-act="map-list">${ICON.map}<span>Fit map</span></button>` : ""}
+          ${pids.length ? `<button class="pill" data-act="share-list">${ICON.share}<span>Share</span></button>` : ""}
+          ${pids.length ? `<button class="pill${nDl === pids.length ? " on dlall" : ""}" data-act="dl-list">${nDl === pids.length ? ICON.done : ICON.dl}<span>${nDl === pids.length ? "Downloaded" : "Download all"}</span></button>` : ""}
+          ${own ? `<button class="pill" data-act="rename-list">Rename</button><button class="pill danger" data-act="delete-list">Delete</button>` : ""}
+        </div>
+      </div>
+      <ol class="llist">
+        ${groups.map((g, i) => `
+          <li class="lb">
+            <button class="lbh" data-go="b/${g.b.id}"><span class="pinno">${i + 1}</span><span class="main"><span class="name">${esc(g.b.name)}</span><span class="meta">${esc(A[g.b.area]?.name ?? "")}${g.b.sector && g.b.sector !== A[g.b.area]?.name ? ` · ${esc(g.b.sector)}` : ""}</span></span>${distCell(g.b)}</button>
+            <ul>${g.ps.map((p) => `<li><button class="lp" data-go="p/${p.id}">${gradeHTML(p)}<span class="main"><span class="name">${esc(p.name)}${safetyHTML(p)}${downloaded.has(p.id) ? `<span class="mark dl" title="Downloaded">${ICON.done}</span>` : ""}</span><span class="meta">${starsHTML(p.stars)}${p.height_ft ? ` · ${p.height_ft} ft` : ""}${p.videos?.length ? ` · <span class="vids">${ICON.play}${p.videos.length}</span>` : ""}</span></span></button>${shared ? "" : `<button class="rm" data-act="rm-from-list" data-pid="${p.id}" aria-label="Remove ${esc(p.name)} from this list">×</button>`}</li>`).join("")}</ul>
+          </li>`).join("") || `<li class="empty">${v.id === LIST_SAVED ? "Nothing saved yet. Open any problem and tap <b>Save</b>." : "This list is empty. Open any problem and tap <b>Add to list</b>."}</li>`}
+      </ol>`;
+    drawListPins(groups);
+    return groups;
+  }
+  function openList(view) {
+    state.listView = view;
+    state.sel = null;
+    state.selP = null;
+    $("#detail").hidden = true;
+    $("#listview").hidden = true;
+    $("#listpane").hidden = false;
+    $("#listpane").scrollTop = 0;
+    const groups = renderListPane();
+    if (!isDesktop() && sheet.dataset.snap !== "full") setSnap("half");
+    requestAnimationFrame(() => fitList(groups));
+  }
+  function syncTabs() { $$(".tabs button").forEach((x) => x.setAttribute("aria-selected", x.dataset.tab === state.tab)); }
+  function listsBack() {
+    state.tab = "lists";
+    syncTabs();
+    history.replaceState(null, "", location.pathname + location.search);
+    clearListMode();
+    closeDetail();
+    renderList();
+  }
+
+  // Sharing: the list travels inside the link (name + problem ids), so it needs no server or account.
+  const b64u = {
+    enc: (s) => btoa(String.fromCharCode(...new TextEncoder().encode(s))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, ""),
+    dec: (s) => new TextDecoder().decode(Uint8Array.from(atob(s.replace(/-/g, "+").replace(/_/g, "/")), (c) => c.charCodeAt(0))),
+  };
+  const shareLink = (name, pids) => `${location.origin}${location.pathname}#share/${b64u.enc(name)}/${pids.map((p) => p.toString(36)).join(".")}`;
+  function openShared(nameEnc, idsEnc) {
+    let name = "Shared list";
+    try { name = b64u.dec(nameEnc).slice(0, 60) || name; } catch { /* keep the default name */ }
+    const pids = [...new Set(idsEnc.split(".").map((x) => parseInt(x, 36)))].filter((p) => P[p]);
+    openList({ shared: { name, pids } });
+  }
+  async function shareList(name, pids) {
+    const url = shareLink(name, pids);
+    if (navigator.share) {
+      try { await navigator.share({ title: `${name} · Boulder Atlas`, text: `${name}: ${plural(pids.length, "climb")} in ${REG.name}`, url }); return; }
+      catch (e) { if (e.name === "AbortError") return; }
+    }
+    try { await navigator.clipboard.writeText(url); toast("Link copied. Anyone can open this list with it, no account needed."); }
+    catch { prompt("Copy this link to share the list:", url); }
+  }
+
+  // Picker: add a climb to lists, or name a new list.
+  let pickerPid = null, pickerMode = null; // "add" | "new" | "rename"
+  function openPicker(mode, pid = null) {
+    pickerMode = mode;
+    pickerPid = pid;
+    $("#picker").hidden = false;
+    renderPicker();
+    if (mode !== "add") setTimeout(() => $("#picker input[type=text]")?.focus(), 60);
+  }
+  function renderPicker() {
+    const body = $("#picker .body");
+    if (pickerMode === "add") {
+      const p = P[pickerPid];
+      $("#picker h3").textContent = "Add to list";
+      const ids = [LIST_SAVED, ...[...lists.keys()].sort((a, b) => listName(a).localeCompare(listName(b)))];
+      body.innerHTML = `<p class="muted">${esc(p.name)} · ${esc(p.grade)} · ${esc(B[p.boulder].name)}</p>
+        <ul class="pick">${ids.map((id) => `<li><label><input type="checkbox" data-list="${id}" ${inList(id, pickerPid) ? "checked" : ""}><span>${id === LIST_SAVED ? ICON.saved : ICON.list}${esc(listName(id))}</span><span class="muted">${listPids(id).length}</span></label></li>`).join("")}</ul>
+        <form class="newl" data-act="create"><input type="text" maxlength="60" placeholder="New list, e.g. Buttermilks projects" autocomplete="off" enterkeyhint="done"><button class="pill solid" type="submit">${ICON.plus}<span>Create</span></button></form>`;
+    } else {
+      const rename = pickerMode === "rename";
+      $("#picker h3").textContent = rename ? "Rename list" : "New list";
+      body.innerHTML = `<form class="newl" data-act="${rename ? "rename" : "create"}"><input type="text" maxlength="60" value="${esc(rename ? listName(state.listView?.id) : "")}" placeholder="List name, e.g. Tick list" autocomplete="off" enterkeyhint="done"><button class="pill solid" type="submit">${rename ? "Rename" : `${ICON.plus}<span>Create</span>`}</button></form>`;
+    }
+  }
+
   // ------------------------------------------------------------------ routing (#b/123, #p/456)
   let inApp = false;
   function go(route) {
@@ -938,17 +1177,24 @@
     if (location.hash.slice(1) === route) route_(); else location.hash = route;
   }
   function route_() {
-    const [kind, idStr] = location.hash.slice(1).split("/");
+    const parts = location.hash.slice(1).split("/");
+    const [kind, idStr] = parts;
     const id = +idStr;
     if (kind === "p" && P[id]) openBoulder(P[id].boulder, id);
     else if (kind === "b" && B[id]) openBoulder(id, null);
-    else closeDetail();
+    else if (kind === "list" && (idStr === LIST_SAVED || lists.has(idStr))) openList({ id: idStr });
+    else if (kind === "share" && parts.length >= 3) openShared(parts[1], parts[2]);
+    else {
+      if (state.listView) clearListMode();
+      closeDetail();
+    }
   }
   function openBoulder(bid, pid) {
     const changed = state.sel !== bid;
     state.sel = bid;
     state.selP = pid;
     $("#listview").hidden = true;
+    $("#listpane").hidden = true;
     $("#detail").hidden = false;
     renderDetail();
     if (changed) $("#detail").scrollTop = 0;
@@ -1042,18 +1288,18 @@
       : `<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="4" fill="none" stroke="currentColor" stroke-width="2"/><path d="M4 21c1-4.5 4.5-6.5 8-6.5s7 2 8 6.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg><span>Sign in</span>`;
     btn.title = u ? `Signed in as ${u.email || u.name}` : "Sign in with Google";
     if (u && !$("#acctmenu").hidden && $("#gbtn")) $("#acctmenu").hidden = true;
-    if (state.tab === "saved") renderList();
+    if (state.tab === "lists" && !state.listView) renderList();
   }
   function accountMenu(forceOpen) {
     const m = $("#acctmenu");
     m.hidden = forceOpen ? false : !m.hidden;
     if (m.hidden) return;
     if (!state.user) {
-      m.innerHTML = `<p><b>Sign in to sync your saved climbs</b><br><span class="muted">Your saved list follows you to every device. Downloads stay on each device.</span></p><div class="gbtn" id="gbtn"></div>`;
+      m.innerHTML = `<p><b>Sign in to sync your lists</b><br><span class="muted">Saved climbs and your lists follow you to every device. Downloads stay on each device.</span></p><div class="gbtn" id="gbtn"></div>`;
       window.AtlasAuth?.signIn($("#gbtn"));
       return;
     }
-    m.innerHTML = `<p><b>${esc(state.user.name || "")}</b><br><span class="muted">${esc(state.user.email || "")}</span></p><p class="muted">${plural(saved.size, "saved climb")}, synced across your devices.</p><button class="pill" data-act="signout">Sign out</button>`;
+    m.innerHTML = `<p><b>${esc(state.user.name || "")}</b><br><span class="muted">${esc(state.user.email || "")}</span></p><p class="muted">${plural(saved.size, "saved climb")} and ${plural(lists.size, "list")}, synced across your devices.</p><button class="pill" data-act="signout">Sign out</button>`;
   }
 
   // ------------------------------------------------------------------ wire up
@@ -1088,12 +1334,7 @@
     $("#list").addEventListener("click", async (e) => {
       const act = e.target.closest("[data-act]");
       if (act?.dataset.act === "signin") return accountMenu(true);
-      if (act?.dataset.act === "dl-saved") {
-        act.disabled = true;
-        await downloadProblems([...saved.keys()]);
-        toast(`Downloaded ${plural(saved.size, "saved climb")} for offline.`);
-        return renderList();
-      }
+      if (act?.dataset.act === "new-list") return openPicker("new");
       const it = e.target.closest("[data-go]");
       if (it) go(it.dataset.go);
     });
@@ -1102,6 +1343,7 @@
       const a = act?.dataset.act;
       if (a === "back") return back();
       if (a === "locate") return startLocate(true);
+      if (a === "addlist") return openPicker("add", +act.dataset.pid);
       if (a === "save") {
         const pid = +act.dataset.pid;
         setSaved(pid, !saved.has(pid));
@@ -1136,6 +1378,61 @@
         selectProblem(isOpen ? null : pid, pb.classList.contains("badge"));
       }
     });
+    $("#listpane").addEventListener("click", async (e) => {
+      const act = e.target.closest("[data-act]");
+      const a = act?.dataset.act;
+      const v = state.listView;
+      if (!v) return;
+      const pids = currentListPids();
+      if (a === "lists-back") return listsBack();
+      if (a === "map-list") return fitList(listOrder(pids));
+      if (a === "share-list") return shareList(v.shared ? v.shared.name : listName(v.id), listOrder(pids).flatMap((g) => g.ps.map((p) => p.id)));
+      if (a === "dl-list") {
+        act.classList.add("busy");
+        await downloadProblems(pids);
+        toast(`Downloaded ${plural(pids.length, "climb")} for offline use.`);
+        return renderListPane();
+      }
+      if (a === "rename-list") return openPicker("rename");
+      if (a === "delete-list") {
+        if (confirm(`Delete “${listName(v.id)}”? The climbs stay in Boulder Atlas.`)) { deleteList(v.id); listsBack(); }
+        return;
+      }
+      if (a === "rm-from-list") return setInList(v.id, +act.dataset.pid, false);
+      if (a === "keep-shared") {
+        const id = createList(v.shared.name, pids);
+        toast(`Saved “${v.shared.name}” to your lists.`);
+        history.replaceState(null, "", `#list/${id}`);
+        return openList({ id });
+      }
+      const it = e.target.closest("[data-go]");
+      if (it) go(it.dataset.go);
+    });
+    $("#picker").addEventListener("click", (e) => {
+      if (e.target.id === "picker" || e.target.closest("[data-act=close]")) $("#picker").hidden = true;
+    });
+    $("#picker").addEventListener("change", (e) => {
+      const cb = e.target.closest("input[data-list]");
+      if (cb && pickerPid) setInList(cb.dataset.list, pickerPid, cb.checked);
+    });
+    $("#picker").addEventListener("submit", (e) => {
+      e.preventDefault();
+      const form = e.target.closest("form");
+      const name = form.querySelector("input[type=text]").value.trim();
+      if (!name) return;
+      if (form.dataset.act === "rename") {
+        renameList(state.listView.id, name);
+        $("#picker").hidden = true;
+      } else if (pickerMode === "add") {
+        createList(name, [pickerPid]);
+        toast(`Added to “${name}”.`);
+      } else {
+        const id = createList(name);
+        $("#picker").hidden = true;
+        go(`list/${id}`);
+        toast("List created. Open any problem and tap Add to list.");
+      }
+    });
     $("#btn-locate").addEventListener("click", () => startLocate(true));
     $("#btn-layer").addEventListener("click", () => toggleSat());
     $("#btn-fit").addEventListener("click", () => (state.area !== "all" ? fitArea(state.area) : fitRegion()));
@@ -1153,8 +1450,10 @@
     addEventListener("hashchange", route_);
     addEventListener("keydown", (e) => {
       if (e.key === "Escape") {
-        if (!$("#offline").hidden) $("#offline").hidden = true;
+        if (!$("#picker").hidden) $("#picker").hidden = true;
+        else if (!$("#offline").hidden) $("#offline").hidden = true;
         else if (state.sel) back();
+        else if (state.listView) listsBack();
       }
     });
     addEventListener("online", onNet);
@@ -1194,7 +1493,9 @@
   window.Atlas = {
     bus,
     get saved() { return Object.fromEntries(saved); },
+    get lists() { return Object.fromEntries(lists); },
     replaceSaved,
+    replaceLists,
     setUser,
     toast,
     ready: null,

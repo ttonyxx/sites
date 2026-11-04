@@ -3,7 +3,7 @@
 //  - atlas-data:    region files (network first, cached copy when offline)
 //  - atlas-dl:      things a climber chose to download (beta video thumbnails); cache first
 //  - atlas-lib:     Firebase SDK modules for sign-in (versioned URLs, cache first)
-const SHELL = "atlas-shell-v6";
+const SHELL = "atlas-shell-v7";
 const FILES = [
   "./", "index.html", "style.css", "app.js", "auth.js", "firebase-config.js", "manifest.webmanifest", "icon.svg",
   "icons/apple-touch-icon.png", "icons/icon-192.png", "icons/icon-512.png",

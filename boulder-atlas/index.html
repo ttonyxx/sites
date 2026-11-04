@@ -63,7 +63,7 @@
         <div class="tabs" role="tablist">
           <button role="tab" data-tab="problems" aria-selected="true">Problems <b id="n-problems"></b></button>
           <button role="tab" data-tab="boulders" aria-selected="false">Boulders <b id="n-boulders"></b></button>
-          <button role="tab" data-tab="saved" aria-selected="false">Saved <b id="n-saved"></b></button>
+          <button role="tab" data-tab="lists" aria-selected="false">Lists <b id="n-lists"></b></button>
         </div>
         <div class="filters" id="filters">
           <label class="sel area">Area <select id="area"></select></label>
@@ -94,12 +94,21 @@
       </footer>
     </section>
 
+    <section id="listpane" hidden></section>
+
     <section id="detail" hidden></section>
   </aside>
 
   <div id="offline" class="modal" hidden>
     <div class="card" role="dialog" aria-modal="true" aria-labelledby="offline-title">
       <div class="mhead"><h3 id="offline-title">Offline &amp; install</h3><button class="x" data-act="close" aria-label="Close">×</button></div>
+      <div class="body"></div>
+    </div>
+  </div>
+
+  <div id="picker" class="modal" hidden>
+    <div class="card" role="dialog" aria-modal="true" aria-labelledby="picker-title">
+      <div class="mhead"><h3 id="picker-title">Add to list</h3><button class="x" data-act="close" aria-label="Close">×</button></div>
       <div class="body"></div>
     </div>
   </div>
