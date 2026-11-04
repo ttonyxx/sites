@@ -25,10 +25,17 @@ Sad Boulders, Druid Stones, and smaller spots).
 
 ## Accounts (Google sign-in)
 
-`auth.js` uses Firebase Auth (Google provider) + Cloud Firestore. It's off until
-`firebase-config.js` sets `window.ATLAS_FIREBASE` to the project's web config. Firestore rules live
-in `firestore.rules`: each person can only read/write `users/{their uid}` = `{ saved: {problemId:
-savedAt}, updatedAt }`. Add the site's domain under Authentication → Settings → Authorized domains.
+`auth.js` shows Google's own "Sign in with Google" button (Google Identity Services). The button
+returns an ID token for the OAuth client "Boulder Atlas web" (Google Cloud project `tonyxin-8bae2` →
+Google Auth Platform → Clients), and Firebase Auth turns it into a session with
+`signInWithCredential`; Firebase accepts it because that client ID is on the Google provider's
+safelist (Firebase → Authentication → Sign-in method → Google). Saved climbs live in Cloud
+Firestore at `users/{uid}` = `{ saved: {problemId: savedAt}, updatedAt }`, and the rules in
+`firestore.rules` let each person read and write only their own document. Config is in
+`firebase-config.js` (public by design); to run without accounts, set it to `null`.
+
+To use a new domain, add it to the OAuth client's "Authorized JavaScript origins" and to
+Firebase → Authentication → Settings → Authorized domains.
 
 ## Data
 

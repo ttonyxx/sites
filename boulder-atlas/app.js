@@ -740,6 +740,7 @@
         <div class="bvh">${ICON.play}<b>Beta videos</b>${p.videos?.length ? ` <span>${p.videos.length} from climbers on Mountain Project</span>` : ""}</div>
         ${vids ? `<div class="vrow">${vids}</div>` : `<p class="none">No videos posted on Mountain Project yet.</p>`}
         <a class="ysearch" href="https://www.youtube.com/results?search_query=${q}" target="_blank" rel="noopener">Search YouTube for more beta ↗</a>
+        ${p.videos?.length ? `<p class="vnote">Videos play from YouTube, so they need signal. To keep one for offline, open it in the YouTube app and tap <b>Download</b> (YouTube Premium).</p>` : ""}
       </div>`;
   }
 
@@ -1040,12 +1041,18 @@
       ? (u.photo ? `<img src="${esc(u.photo)}" alt="" referrerpolicy="no-referrer">` : `<span class="ini">${esc((u.name || u.email || "?")[0].toUpperCase())}</span>`)
       : `<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="4" fill="none" stroke="currentColor" stroke-width="2"/><path d="M4 21c1-4.5 4.5-6.5 8-6.5s7 2 8 6.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg><span>Sign in</span>`;
     btn.title = u ? `Signed in as ${u.email || u.name}` : "Sign in with Google";
+    if (u && !$("#acctmenu").hidden && $("#gbtn")) $("#acctmenu").hidden = true;
     if (state.tab === "saved") renderList();
   }
-  function accountMenu() {
+  function accountMenu(forceOpen) {
     const m = $("#acctmenu");
-    if (!state.user) { window.AtlasAuth?.signIn(); return; }
-    m.hidden = !m.hidden;
+    m.hidden = forceOpen ? false : !m.hidden;
+    if (m.hidden) return;
+    if (!state.user) {
+      m.innerHTML = `<p><b>Sign in to sync your saved climbs</b><br><span class="muted">Your saved list follows you to every device. Downloads stay on each device.</span></p><div class="gbtn" id="gbtn"></div>`;
+      window.AtlasAuth?.signIn($("#gbtn"));
+      return;
+    }
     m.innerHTML = `<p><b>${esc(state.user.name || "")}</b><br><span class="muted">${esc(state.user.email || "")}</span></p><p class="muted">${plural(saved.size, "saved climb")}, synced across your devices.</p><button class="pill" data-act="signout">Sign out</button>`;
   }
 
@@ -1080,7 +1087,7 @@
     $("#area").addEventListener("change", (e) => openArea(e.target.value));
     $("#list").addEventListener("click", async (e) => {
       const act = e.target.closest("[data-act]");
-      if (act?.dataset.act === "signin") return window.AtlasAuth?.signIn();
+      if (act?.dataset.act === "signin") return accountMenu(true);
       if (act?.dataset.act === "dl-saved") {
         act.disabled = true;
         await downloadProblems([...saved.keys()]);
@@ -1166,7 +1173,7 @@
     REG.problems = REG.problems.filter((p) => B[p.boulder]);
     for (const id of [...saved.keys()]) if (!P[id]) saved.delete(id);
     $("#gen").textContent = new Date(REG.generated + "T12:00:00").toLocaleDateString(undefined, { month: "short", year: "numeric" });
-    $("#subtitle").textContent = `${REG.name}, ${REG.place.split(",")[0]} · ${REG.problems.length.toLocaleString()} problems`;
+    $("#subtitle").textContent = `${REG.name} · ${REG.problems.length.toLocaleString()} problems`;
     document.title = `Boulder Atlas · ${REG.name}`;
     renderChips();
     renderAreaSelect();

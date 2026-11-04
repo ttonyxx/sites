@@ -121,6 +121,7 @@ a { color: var(--accent); }
   display: inline-flex; align-items: center; gap: 5px; padding: 0 10px 0 7px; cursor: pointer; font-weight: 600; font-size: 14px;
 }
 .acct[hidden] { display: none; }
+.acct span { white-space: nowrap; }
 .acct svg { width: 18px; height: 18px; }
 .acct.in { padding: 0; width: 34px; justify-content: center; overflow: hidden; }
 .acct img { width: 100%; height: 100%; object-fit: cover; }
@@ -129,6 +130,7 @@ a { color: var(--accent); }
   pointer-events: auto; flex-basis: 100%; max-width: 300px; background: var(--paper); border: 1px solid var(--line);
   border-radius: 12px; padding: 4px 14px 12px; box-shadow: 0 6px 20px rgba(45, 38, 32, .2); font-size: 14px;
 }
+.gbtn { min-height: 44px; margin-top: 6px; }
 .locstatus {
   pointer-events: auto; align-self: center;
   background: var(--paper); border: 1px solid var(--line); border-radius: 999px; padding: 5px 12px;
@@ -314,6 +316,7 @@ a { color: var(--accent); }
 .vid .vm { display: block; font-size: 12px; color: var(--ink-3); font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .betavids .none { margin: 6px 0 0; color: var(--ink-3); }
 .ysearch { display: inline-block; margin-top: 6px; font-size: 14px; }
+.vnote { margin: 6px 0 0 !important; font-size: 12.5px; color: var(--ink-3); }
 
 /* ------------------------------------------------------------------ offline modal */
 .modal { position: fixed; inset: 0; z-index: 1250; background: rgba(30, 24, 18, .45); display: grid; place-items: end center; }
@@ -355,6 +358,10 @@ svg.inl { width: 16px; height: 16px; vertical-align: -3px; }
 }
 @media (max-width: 899px) {
   .leaflet-bottom { bottom: calc(178px + var(--safe-b)); }
+}
+@media (max-width: 440px) {
+  .acct:not(.in) { width: 34px; padding: 0; justify-content: center; }
+  .acct:not(.in) span { display: none; }
 }
 @media (max-width: 380px) {
   .brand p { display: none; }

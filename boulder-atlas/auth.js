@@ -2,44 +2,74 @@
 // Optional: if firebase-config.js doesn't define window.ATLAS_FIREBASE, the app runs signed-out and
 // keeps saved climbs on this device only. Loaded as a module so a failed import (e.g. offline before
 // the SDK was ever cached) never breaks the map.
+//
+// Sign-in uses Google's own "Sign in with Google" button (Google Identity Services). It returns an
+// ID token, which Firebase turns into a session with signInWithCredential.
 const cfg = window.ATLAS_FIREBASE;
 const V = "13.1.0";
 
-if (cfg && window.Atlas) {
+if (cfg && cfg.googleClientId && window.Atlas) {
   const [{ initializeApp }, authMod, fsMod] = await Promise.all([
     import(`https://www.gstatic.com/firebasejs/${V}/firebase-app.js`),
     import(`https://www.gstatic.com/firebasejs/${V}/firebase-auth.js`),
     import(`https://www.gstatic.com/firebasejs/${V}/firebase-firestore.js`),
   ]);
-  const { getAuth, GoogleAuthProvider, signInWithPopup, signInWithRedirect, getRedirectResult, onAuthStateChanged, signOut } = authMod;
+  const { getAuth, GoogleAuthProvider, signInWithCredential, onAuthStateChanged, signOut } = authMod;
   const { initializeFirestore, persistentLocalCache, persistentMultipleTabManager, doc, onSnapshot, setDoc, deleteField, serverTimestamp } = fsMod;
 
   const app = initializeApp(cfg);
   const auth = getAuth(app);
   const db = initializeFirestore(app, { localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() }) });
-  const provider = new GoogleAuthProvider();
-  provider.setCustomParameters({ prompt: "select_account" });
 
   await window.Atlas.ready;
-  let uid = null, unsub = null, firstSnap = true;
+  let uid = null, unsub = null, firstSnap = true, gis = null;
+
+  function loadGis() {
+    if (gis) return gis;
+    gis = new Promise((resolve, reject) => {
+      const s = document.createElement("script");
+      s.src = "https://accounts.google.com/gsi/client";
+      s.async = true;
+      s.onload = resolve;
+      s.onerror = () => { gis = null; reject(new Error("gis")); };
+      document.head.appendChild(s);
+    }).then(() => {
+      google.accounts.id.initialize({
+        client_id: cfg.googleClientId,
+        callback: async ({ credential }) => {
+          try {
+            await signInWithCredential(auth, GoogleAuthProvider.credential(credential));
+          } catch (e) {
+            console.warn(e);
+            window.Atlas.toast("Couldn’t finish signing in. Please try again.");
+          }
+        },
+        auto_select: false,
+        cancel_on_tap_outside: true,
+        itp_support: true,
+        use_fedcm_for_button: true,
+        context: "signin",
+      });
+    });
+    return gis;
+  }
 
   window.AtlasAuth = {
-    async signIn() {
-      try {
-        await signInWithPopup(auth, provider);
-      } catch (e) {
-        if (e.code === "auth/popup-blocked" || e.code === "auth/operation-not-supported-in-this-environment") {
-          await signInWithRedirect(auth, provider);
-        } else if (e.code !== "auth/popup-closed-by-user" && e.code !== "auth/cancelled-popup-request") {
-          window.Atlas.toast(navigator.onLine ? "Couldn’t sign in. Please try again." : "Signing in needs a connection.");
-          console.warn(e);
-        }
+    // Renders Google's sign-in button into `el` (the account menu).
+    async signIn(el) {
+      if (!navigator.onLine) { window.Atlas.toast("Signing in needs a connection."); return; }
+      try { await loadGis(); } catch { window.Atlas.toast("Couldn’t reach Google. Try again with signal."); return; }
+      if (el) {
+        el.innerHTML = "";
+        google.accounts.id.renderButton(el, { type: "standard", theme: "outline", size: "large", text: "continue_with", shape: "pill", logo_alignment: "left", width: 250 });
       }
     },
-    signOut: () => signOut(auth),
+    async signOut() {
+      await signOut(auth);
+      try { google.accounts.id.disableAutoSelect(); } catch { /* not loaded */ }
+    },
   };
   window.Atlas.setUser(null);
-  getRedirectResult(auth).catch(() => {});
 
   onAuthStateChanged(auth, (user) => {
     if (unsub) { unsub(); unsub = null; }
