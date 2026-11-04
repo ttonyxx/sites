@@ -4,14 +4,36 @@
     {
       "name": "pirates",
       "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "dev", "--prefix", "pirates", "--", "--port", "3007"],
+      "runtimeArgs": [
+        "run",
+        "dev",
+        "--prefix",
+        "pirates",
+        "--",
+        "--port",
+        "3007"
+      ],
       "port": 3007
     },
     {
       "name": "sites-preview",
       "runtimeExecutable": "node",
-      "runtimeArgs": ["scripts/preview.mjs"],
+      "runtimeArgs": [
+        "scripts/preview.mjs"
+      ],
       "port": 4173
+    },
+    {
+      "name": "buttermilks",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "4180",
+        "--directory",
+        "buttermilks"
+      ],
+      "port": 4180
     }
   ]
 }

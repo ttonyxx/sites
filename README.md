@@ -10,6 +10,7 @@ https://tonyxin.com/sites/<folder>/
 
 | Site | URL | What it is |
 | --- | --- | --- |
+| [`buttermilks`](buttermilks) | [tonyxin.com/sites/buttermilks](https://tonyxin.com/sites/buttermilks/) | Every Buttermilks (Bishop) boulder problem on a simple map with your live location, to-scale boulder drawings, and a searchable grade catalog |
 | [`pirates`](pirates) | [tonyxin.com/sites/pirates](https://tonyxin.com/sites/pirates/) | **Pirates Blitz**: an arcade trainer for the anagram-stealing word game Pirates |
 | [`sleep-when-done`](sleep-when-done) | [tonyxin.com/sites/sleep-when-done](https://tonyxin.com/sites/sleep-when-done/) | Close your MacBook while Claude Code works: sessions finish, then it sleeps. The page hosts the script and agent install instructions. |
 

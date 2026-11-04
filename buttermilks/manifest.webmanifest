@@ -1,0 +1,11 @@
+{
+  "name": "Buttermilks Boulders",
+  "short_name": "Buttermilks",
+  "description": "Map and catalog of every boulder problem in the Buttermilks, Bishop CA.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#ede4d3",
+  "theme_color": "#2d2620",
+  "icons": [{ "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }]
+}
