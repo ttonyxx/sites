@@ -10,7 +10,7 @@ https://tonyxin.com/sites/<folder>/
 
 | Site | URL | What it is |
 | --- | --- | --- |
-| [`buttermilks`](buttermilks) | [tonyxin.com/sites/buttermilks](https://tonyxin.com/sites/buttermilks/) | Every Buttermilks (Bishop) boulder problem on a simple map with your live location, to-scale boulder drawings, and a searchable grade catalog |
+| [`boulder-atlas`](boulder-atlas) | [tonyxin.com/sites/boulder-atlas](https://tonyxin.com/sites/boulder-atlas/) | **Boulder Atlas**: an offline-first map of bouldering areas, starting with Bishop: every problem, beta videos, your live location, saved climbs, boulders drawn to scale |
 | [`pirates`](pirates) | [tonyxin.com/sites/pirates](https://tonyxin.com/sites/pirates/) | **Pirates Blitz**: an arcade trainer for the anagram-stealing word game Pirates |
 | [`sleep-when-done`](sleep-when-done) | [tonyxin.com/sites/sleep-when-done](https://tonyxin.com/sites/sleep-when-done/) | Close your MacBook while Claude Code works: sessions finish, then it sleeps. The page hosts the script and agent install instructions. |
 
@@ -38,7 +38,8 @@ On every push to `main`, [`.github/workflows/deploy.yml`](.github/workflows/depl
 2. Either drop an `index.html` in it, or create a Node project whose `build` script emits static files.
    Frameworks need to know they live under a sub-path: read `process.env.SITE_BASE_PATH`
    (it defaults to `/sites/<folder>`). For Next.js that means `output: "export"` and `basePath`.
-3. Optional: add `site.json` with `{ "title": "...", "description": "..." }` for the index page.
+3. Optional: add `site.json` with `{ "title": "...", "description": "..." }` for the index page
+   (add `"unlisted": true` to keep a folder, such as a redirect stub, off the index).
 4. Merge to `main`. It's live a minute later.
 
 For day-to-day work, use each site's own dev server (see its README). To build everything

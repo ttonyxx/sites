@@ -24,16 +24,16 @@
       "port": 4173
     },
     {
-      "name": "buttermilks",
+      "name": "boulder-atlas",
       "runtimeExecutable": "python3",
       "runtimeArgs": [
         "-m",
         "http.server",
-        "4180",
+        "4181",
         "--directory",
-        "buttermilks"
+        "boulder-atlas"
       ],
-      "port": 4180
+      "port": 4181
     }
   ]
 }

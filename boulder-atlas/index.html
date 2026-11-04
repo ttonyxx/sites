@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Boulder Atlas</title>
+  <meta name="description" content="An offline-first map of bouldering areas: every problem, beta videos, your live location, and boulders drawn to scale. Starting with Bishop, CA.">
+  <meta name="theme-color" content="#2d2620">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Boulder Atlas">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="preload" href="vendor/fonts/barlow-400.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="vendor/fonts/barlow-600.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="vendor/fonts/barlow-semi-condensed-700.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="vendor/leaflet/leaflet.css">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="map" class="simple" aria-label="Map of bouldering areas"></div>
+
+  <header class="topbar">
+    <div class="brand">
+      <svg viewBox="0 0 32 32" aria-hidden="true"><path d="M4 25c1-6 4-11 9-13 3-1 4-5 8-5 4 0 7 6 7 11 0 4-1 6-1 7z" fill="#c9a77c" stroke="#2d2620" stroke-width="2" stroke-linejoin="round"/><path d="M15 25c.5-4 1.5-7 3-10" stroke="#1d6fd1" stroke-width="2.2" fill="none" stroke-linecap="round"/></svg>
+      <div>
+        <h1>Boulder Atlas</h1>
+        <p id="subtitle">Loading…</p>
+      </div>
+      <button id="btn-account" class="acct" hidden aria-label="Account"></button>
+    </div>
+    <div id="acctmenu" class="acctmenu" hidden></div>
+    <div id="netstatus" class="locstatus off" hidden>Offline · using saved map</div>
+    <div id="locstatus" class="locstatus" hidden></div>
+  </header>
+
+  <div class="mapbtns">
+    <button id="btn-locate" class="fab" title="Show my location" aria-label="Show my location">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4" fill="currentColor"/><circle cx="12" cy="12" r="8" fill="none" stroke="currentColor" stroke-width="2"/><path d="M12 1v4M12 19v4M1 12h4M19 12h4" stroke="currentColor" stroke-width="2"/></svg>
+    </button>
+    <button id="btn-layer" class="fab" title="Satellite view" aria-label="Switch between trail map and satellite">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 2 8l10 5 10-5z" fill="currentColor"/><path d="m2 12 10 5 10-5M2 16l10 5 10-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>
+    </button>
+    <button id="btn-offline" class="fab" title="Offline & install" aria-label="Offline and install options">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v11m-5-5 5 5 5-5M5 20h14" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    </button>
+    <button id="btn-fit" class="fab" title="Show whole area" aria-label="Zoom out to the whole area">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 9V3h6M21 9V3h-6M3 15v6h6M21 15v6h-6" fill="none" stroke="currentColor" stroke-width="2.2"/></svg>
+    </button>
+  </div>
+
+  <aside id="sheet" class="sheet" data-snap="peek">
+    <div class="handle" id="handle" role="button" tabindex="0" aria-label="Expand or collapse list"><span></span></div>
+
+    <section id="listview">
+      <div class="controls">
+        <div class="search">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5" fill="none" stroke="currentColor" stroke-width="2"/><path d="m15.5 15.5 5 5" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>
+          <input id="q" type="search" placeholder="Search problems, boulders, “v4”…" autocomplete="off" enterkeyhint="search">
+        </div>
+        <div class="tabs" role="tablist">
+          <button role="tab" data-tab="problems" aria-selected="true">Problems <b id="n-problems"></b></button>
+          <button role="tab" data-tab="boulders" aria-selected="false">Boulders <b id="n-boulders"></b></button>
+          <button role="tab" data-tab="saved" aria-selected="false">Saved <b id="n-saved"></b></button>
+        </div>
+        <div class="filters" id="filters">
+          <label class="sel area">Area <select id="area"></select></label>
+          <div class="chips" id="grade-chips" aria-label="Grade filter"></div>
+          <div class="row2">
+            <label class="sel">Stars
+              <select id="stars">
+                <option value="0">Any</option>
+                <option value="2">★★+</option>
+                <option value="3">★★★+</option>
+                <option value="3.5">★★★½+</option>
+              </select>
+            </label>
+            <label class="sel">Sort
+              <select id="sort">
+                <option value="grade">Grade</option>
+                <option value="stars">Stars</option>
+                <option value="name">Name</option>
+                <option value="near">Nearest me</option>
+              </select>
+            </label>
+          </div>
+        </div>
+      </div>
+      <ul id="list" class="list"></ul>
+      <footer class="credits">
+        Problem data and beta videos from <a href="https://www.mountainproject.com" target="_blank" rel="noopener">Mountain Project</a>, gathered <span id="gen"></span>. Paths © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a>. Drawings are to scale from listed heights; shapes are illustrative. GPS can be off by a boulder or two.
+      </footer>
+    </section>
+
+    <section id="detail" hidden></section>
+  </aside>
+
+  <div id="offline" class="modal" hidden>
+    <div class="card" role="dialog" aria-modal="true" aria-labelledby="offline-title">
+      <div class="mhead"><h3 id="offline-title">Offline &amp; install</h3><button class="x" data-act="close" aria-label="Close">×</button></div>
+      <div class="body"></div>
+    </div>
+  </div>
+
+  <div id="toast" class="toast" role="status" hidden></div>
+
+  <script src="firebase-config.js"></script>
+  <script src="vendor/leaflet/leaflet.js"></script>
+  <script src="app.js"></script>
+  <script type="module" src="auth.js"></script>
+</body>
+</html>

@@ -75,6 +75,7 @@ function buildSite(name) {
     name,
     title: meta.title ?? pkg?.displayName ?? name,
     description: meta.description ?? pkg?.description ?? "",
+    unlisted: meta.unlisted === true,
   };
 }
 
@@ -84,6 +85,7 @@ function escapeHtml(s) {
 
 function writeIndex(sites) {
   const items = sites
+    .filter((s) => !s.unlisted) // e.g. redirect stubs for renamed sites
     .map(
       (s) => `      <a class="site" href="${URL_PREFIX}/${s.name}/">
         <span class="name">${escapeHtml(s.title)}</span>

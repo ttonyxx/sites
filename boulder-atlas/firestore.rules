@@ -1,0 +1,13 @@
+rules_version = '2';
+// Each signed-in person can read and write only their own document: users/{uid} = { saved: {problemId: savedAtMillis}, updatedAt }.
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /users/{uid} {
+      allow read, delete: if request.auth != null && request.auth.uid == uid;
+      allow create, update: if request.auth != null && request.auth.uid == uid
+        && request.resource.data.keys().hasOnly(['saved', 'updatedAt'])
+        && request.resource.data.saved is map
+        && request.resource.data.saved.size() <= 5000;
+    }
+  }
+}

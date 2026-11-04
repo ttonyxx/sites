@@ -1,0 +1,77 @@
+{
+ "regions": [
+  {
+   "id": "bishop",
+   "name": "Bishop",
+   "place": "California, USA",
+   "file": "regions/bishop.json",
+   "bytes": 1183876,
+   "generated": "2026-11-04",
+   "areas": [
+    {
+     "id": "happy-boulders",
+     "name": "Happy Boulders",
+     "problems": 543
+    },
+    {
+     "id": "buttermilks",
+     "name": "Buttermilks",
+     "problems": 522
+    },
+    {
+     "id": "sad-boulders",
+     "name": "Sad Boulders",
+     "problems": 242
+    },
+    {
+     "id": "druid-stones",
+     "name": "Druid Stones",
+     "problems": 162
+    },
+    {
+     "id": "hurd-lake",
+     "name": "Hurd Lake",
+     "problems": 22
+    },
+    {
+     "id": "sabrina-basin",
+     "name": "Sabrina Basin",
+     "problems": 12
+    },
+    {
+     "id": "south-lake",
+     "name": "South Lake",
+     "problems": 9
+    },
+    {
+     "id": "little-egypt",
+     "name": "Little Egypt",
+     "problems": 6
+    },
+    {
+     "id": "pine-creek-canyon",
+     "name": "Pine Creek Canyon",
+     "problems": 5
+    },
+    {
+     "id": "keough-hot-springs",
+     "name": "Keough Hot Springs",
+     "problems": 2
+    },
+    {
+     "id": "fish-slough-boulders",
+     "name": "Fish Slough Boulders",
+     "problems": 2
+    }
+   ],
+   "boulders": 339,
+   "problems": 1527,
+   "bbox": [
+    37.14895,
+    -118.68672,
+    37.44573,
+    -118.37656
+   ]
+  }
+ ]
+}
