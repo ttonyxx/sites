@@ -632,15 +632,32 @@
     const core = bs.filter((b) => distM(mid, b) < 1500);
     map.fitBounds(boundsOf(core.length ? core : bs), { paddingTopLeft: padTL(), paddingBottomRight: padBR(), animate, maxZoom: 18.5 });
   }
-  function padTL() { return isDesktop() ? [$("#sheet").offsetWidth + 40, 30] : [20, 80]; }
+  function padTL() { return isDesktop() ? [$("#sheet").offsetWidth + 40, 30] : [20, ($(".brand")?.getBoundingClientRect().bottom ?? 70) + 14]; }
   function padBR() { return isDesktop() ? [70, 30] : [60, sheetCover() + 10]; }
-  function sheetCover() { return Math.max(0, innerHeight - $("#sheet").getBoundingClientRect().top); }
+  function sheetCover() {
+    const snap = $("#sheet").dataset.snap;
+    if (snap === "full") return innerHeight;
+    if (snap === "half") return innerHeight * 0.52; // the snap it is heading to, even mid-animation
+    return Math.max(0, innerHeight - $("#sheet").getBoundingClientRect().top);
+  }
   function focus(latlng, zoom) {
     const z = zoom ?? Math.max(map.getZoom(), 18.5);
     const px = map.project(latlng, z);
     if (isDesktop()) px.x -= ($("#sheet").offsetWidth + 12) / 2;
     else px.y += Math.min(innerHeight * 0.52, innerHeight * 0.6) / 2 - 20;
-    map.flyTo(map.unproject(px, z), z, { duration: 0.6 });
+    const target = map.unproject(px, z);
+    const dz = Math.abs(z - map.getZoom());
+    // Short hops glide (pan, or one smooth zoom); only long trips use the fly-over arc.
+    if (dz < 0.01 && map.getBounds().pad(0.5).contains(latlng)) map.panTo(target, { animate: true, duration: 0.45, easeLinearity: 0.25 });
+    else if (dz <= 2 && map.getBounds().contains(latlng)) map.setView(target, z, { animate: true });
+    else map.flyTo(target, z, { duration: 0.6 });
+  }
+  // Is this spot clearly visible: on the map, below the header card and above the sheet?
+  function inMapView(ll) {
+    const p = map.latLngToContainerPoint(ll), size = map.getSize();
+    if (isDesktop()) return p.x > $("#sheet").getBoundingClientRect().right + 20 && p.x < size.x - 70 && p.y > 40 && p.y < size.y - 30;
+    const top = ($(".brand")?.getBoundingClientRect().bottom ?? 70) + 46; // + room for a numbered pin
+    return p.x > 24 && p.x < size.x - 24 && p.y > top && p.y < size.y - sheetCover() - 24;
   }
 
   function toggleSat(force) {
@@ -1064,9 +1081,20 @@
     scrollArtTo(pid);
     if (scroll) {
       const li = $(`#detail .plist li[data-pid="${pid}"]`);
-      li && li.scrollIntoView({ block: "nearest", behavior: "smooth" });
+      if (li) scrollRowIntoView(li, scroll !== "jump");
     }
     updateWhere();
+  }
+  // Put a climb's row just under the boulder's sticky header. (scrollIntoView tucks a tall,
+  // expanded row behind the header on iPhone.) Rows already comfortably in view stay put.
+  function scrollRowIntoView(li, smooth) {
+    const sc = $("#detail");
+    const headH = sc.querySelector(".dhead")?.offsetHeight ?? 0;
+    const top = li.getBoundingClientRect().top - sc.getBoundingClientRect().top;
+    if (top >= headH && top + 140 <= sc.clientHeight) return;
+    const y = Math.max(0, sc.scrollTop + top - headH - 6);
+    if (smooth) sc.scrollTo({ top: y, behavior: "smooth" });
+    else sc.scrollTop = y;
   }
 
   // ------------------------------------------------------------------ downloads (offline beta)
@@ -1206,7 +1234,8 @@
   }
   function fitList(groups) {
     if (!groups.length) return;
-    map.fitBounds(L.latLngBounds(groups.map((g) => [g.b.lat, g.b.lon])), { paddingTopLeft: padTL(), paddingBottomRight: padBR(), maxZoom: 18.5 });
+    const tl = padTL();
+    map.fitBounds(L.latLngBounds(groups.map((g) => [g.b.lat, g.b.lon])), { paddingTopLeft: [tl[0] + 10, tl[1] + 40], paddingBottomRight: padBR(), maxZoom: 18.5 });
   }
   function clearListMode() {
     if (!$("#listpane").hidden) animatePane($("#listview"), "back");
@@ -1263,7 +1292,7 @@
     $("#listpane").scrollTop = 0;
     const groups = renderListPane();
     if (!isDesktop() && sheet.dataset.snap !== "full") setSnap("half");
-    requestAnimationFrame(() => fitList(groups));
+    if (!fromDetail || !groups.every((g) => inMapView([g.b.lat, g.b.lon]))) requestAnimationFrame(() => fitList(groups));
   }
   function syncTabs() {
     $$(".tabs button").forEach((x, i) => {
@@ -1350,7 +1379,14 @@
   let inApp = false;
   function go(route) {
     inApp = true;
-    if (location.hash.slice(1) === route) route_(); else location.hash = route;
+    const cur = location.hash.slice(1);
+    if (cur === route) return route_();
+    // Hopping from one boulder or climb to another replaces the history entry, so Back (and the
+    // "List" button) returns to the list you came from, not to the previous boulder.
+    if (/^[pb]\//.test(route) && /^[pb]\//.test(cur)) {
+      history.replaceState(null, "", `#${route}`);
+      route_();
+    } else location.hash = route;
   }
   function route_() {
     const parts = location.hash.slice(1).split("/");
@@ -1377,11 +1413,15 @@
     if (!wasOpen) animatePane($("#detail"), "fwd");
     else if (changed) animatePane($("#detail"), "swap");
     if (changed) $("#detail").scrollTop = 0;
-    if (pid) setTimeout(() => selectProblem(pid, true), 30);
+    if (pid) selectProblem(pid, changed || !wasOpen ? "jump" : "smooth");
     highlight();
     if (!isDesktop() && sheet.dataset.snap !== "full") setSnap("half");
     const b = B[bid];
-    focus([b.lat, b.lon]);
+    // In a list the map keeps its zoom so the other numbered pins stay around; it only moves when
+    // the boulder would be hidden (or you're zoomed far out).
+    if (state.listView) {
+      if (map.getZoom() < 16.5 || !inMapView([b.lat, b.lon])) focus([b.lat, b.lon], Math.max(map.getZoom(), 17));
+    } else focus([b.lat, b.lon]);
   }
   function closeDetail() {
     const wasOpen = !$("#detail").hidden || !$("#listpane").hidden;
@@ -1409,7 +1449,7 @@
   }
   function initSheet() {
     const handle = $("#handle");
-    let startY = 0, startT = 0, dragging = false, moved = false, lastY = 0, lastT = 0, vel = 0;
+    const d = { on: false, moved: false, startY: 0, startT: 0, lastY: 0, lastT: 0, vel: 0 };
     // How much of the minimized sheet stays visible: the handle plus the home-indicator area.
     const miniPx = () => {
       const probe = document.createElement("div");
@@ -1420,42 +1460,88 @@
       return 26 + sb;
     };
     const curT = () => new DOMMatrix(getComputedStyle(sheet).transform).m42;
-    handle.addEventListener("pointerdown", (e) => {
-      if (isDesktop()) return;
-      dragging = true; moved = false;
-      startY = lastY = e.clientY; startT = curT(); lastT = performance.now();
+    const cycle = () => setSnap(sheet.dataset.snap === "hidden" ? "peek" : SNAPS[(SNAPS.indexOf(sheet.dataset.snap) + 1) % 3]);
+
+    // One drag engine for the handle and the sheet's content.
+    function begin(y) {
+      Object.assign(d, { on: true, moved: false, startY: y, lastY: y, startT: curT(), lastT: performance.now(), vel: 0, max: sheet.offsetHeight - miniPx() });
       sheet.classList.add("dragging");
-      handle.setPointerCapture(e.pointerId);
-    });
-    handle.addEventListener("pointermove", (e) => {
-      if (!dragging) return;
-      const dy = e.clientY - startY;
-      if (Math.abs(dy) > 4) moved = true;
+    }
+    function move(y) {
+      const dy = y - d.startY;
+      if (Math.abs(dy) > 4) d.moved = true;
       const now = performance.now();
-      vel = (e.clientY - lastY) / Math.max(1, now - lastT);
-      lastY = e.clientY; lastT = now;
-      sheet.style.transform = `translateY(${clamp(startT + dy, 0, sheet.offsetHeight - miniPx())}px)`;
-    });
-    const end = () => {
-      if (!dragging) return;
-      dragging = false;
+      d.vel = 0.7 * d.vel + 0.3 * ((y - d.lastY) / Math.max(1, now - d.lastT));
+      d.lastY = y;
+      d.lastT = now;
+      sheet.style.transform = `translateY(${clamp(d.startT + dy, 0, d.max)}px)`;
+    }
+    function finish(tapCycles) {
+      if (!d.on) return;
+      d.on = false;
       sheet.classList.remove("dragging");
       const t = curT();
       sheet.style.transform = "";
-      if (!moved) { setSnap(sheet.dataset.snap === "hidden" ? "peek" : SNAPS[(SNAPS.indexOf(sheet.dataset.snap) + 1) % 3]); return; }
+      if (!d.moved) { if (tapCycles) cycle(); return; }
       const h = sheet.offsetHeight;
       const peekPx = parseFloat(getComputedStyle(sheet).getPropertyValue("--peek")) || 178;
       const pos = { hidden: h - miniPx(), peek: h - peekPx, half: h - innerHeight * 0.52, full: 0 };
-      let best = "half", bd = Infinity;
-      const proj = t + vel * 180;
-      for (const [k, v] of Object.entries(pos)) if (Math.abs(proj - v) < bd) { bd = Math.abs(proj - v); best = k; }
-      setSnap(best);
-    };
-    handle.addEventListener("pointerup", end);
-    handle.addEventListener("pointercancel", end);
-    handle.addEventListener("keydown", (e) => {
-      if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setSnap(sheet.dataset.snap === "hidden" ? "peek" : SNAPS[(SNAPS.indexOf(sheet.dataset.snap) + 1) % 3]); }
+      const v = performance.now() - d.lastT > 120 ? 0 : d.vel; // the finger paused before lifting
+      const proj = t + v * 200; // a flick carries the sheet further
+      const nearest = (list) => list.reduce((m, e) => (Math.abs(e[1] - proj) < Math.abs(m[1] - proj) ? e : m));
+      const stops = Object.entries(pos).sort((a, b) => a[1] - b[1]);
+      let best = nearest(stops);
+      if (Math.abs(v) > 0.25) {
+        // A deliberate swipe always goes on to a stop in that direction (pull down past the peek
+        // and the sheet minimizes), skipping further on a strong flick.
+        const ahead = v > 0 ? stops.filter(([, p]) => p > t + 8) : stops.filter(([, p]) => p < t - 8);
+        if (ahead.length) best = nearest(ahead);
+      }
+      setSnap(best[0]);
+    }
+
+    // Handle: drag, or tap to cycle.
+    handle.addEventListener("pointerdown", (e) => {
+      if (isDesktop()) return;
+      begin(e.clientY);
+      handle.setPointerCapture(e.pointerId);
     });
+    handle.addEventListener("pointermove", (e) => { if (d.on) move(e.clientY); });
+    handle.addEventListener("pointerup", () => finish(true));
+    handle.addEventListener("pointercancel", () => finish(false));
+    handle.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" || e.key === " ") { e.preventDefault(); cycle(); }
+    });
+
+    // Content: pulling down while scrolled to the top moves the sheet down (all the way to
+    // minimized); swiping up on a sheet that isn't fully open opens it first. Sideways swipes
+    // (grade chips, drawings, video rows) are left alone.
+    let g = null;
+    sheet.addEventListener("touchstart", (e) => {
+      if (isDesktop() || e.touches.length !== 1 || e.target.closest("#handle") || d.on) { g = null; return; }
+      const tt = e.touches[0];
+      g = { x: tt.clientX, y: tt.clientY, scroller: e.target.closest("#list, #detail, #listpane"), decided: false, mine: false };
+    }, { passive: true });
+    sheet.addEventListener("touchmove", (e) => {
+      if (!g) return;
+      const tt = e.touches[0];
+      const dx = tt.clientX - g.x, dy = tt.clientY - g.y;
+      if (!g.decided) {
+        if (Math.abs(dx) < 6 && Math.abs(dy) < 6) return;
+        g.decided = true;
+        if (Math.abs(dx) > Math.abs(dy)) return;
+        const atTop = !g.scroller || g.scroller.scrollTop <= 0;
+        if ((dy > 0 && atTop) || (dy < 0 && sheet.dataset.snap !== "full")) {
+          g.mine = true;
+          if (document.activeElement && sheet.contains(document.activeElement)) document.activeElement.blur();
+          begin(tt.clientY);
+        }
+      }
+      if (g.mine && e.cancelable) { e.preventDefault(); move(tt.clientY); }
+    }, { passive: false });
+    const touchEnd = () => { if (g && g.mine) finish(false); g = null; };
+    sheet.addEventListener("touchend", touchEnd);
+    sheet.addEventListener("touchcancel", touchEnd);
   }
 
   // ------------------------------------------------------------------ toast + online state

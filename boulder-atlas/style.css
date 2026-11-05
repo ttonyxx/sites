@@ -280,7 +280,8 @@ a { color: var(--accent); }
 
 /* ------------------------------------------------------------------ detail */
 #detail { overflow-y: auto; overscroll-behavior: contain; padding-bottom: calc(16px + var(--safe-b)); }
-.dhead { position: sticky; top: 0; z-index: 2; background: var(--paper); padding: 0 14px 10px; border-bottom: 1px solid var(--line); }
+.dhead { position: sticky; top: 0; z-index: 2; background: var(--paper); padding: 0 14px 10px; border-bottom: 1px solid var(--line); box-shadow: 0 -2px 0 var(--paper); }
+/* (the shadow covers a sub-pixel sliver of scrolled text that can peek out above the sticky header) */
 .dtop { display: flex; align-items: center; gap: 9px; }
 .back {
   border: 1px solid var(--line); background: #fff; border-radius: 9px; height: 34px; padding: 0 10px 0 6px; cursor: pointer;
