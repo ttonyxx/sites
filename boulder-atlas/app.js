@@ -461,7 +461,7 @@
   };
 
   function initMap() {
-    map = L.map(mapEl, { zoomControl: false, maxZoom: 21, minZoom: 8, zoomSnap: 0.25, wheelPxPerZoomLevel: 90, doubleClickZoom: false });
+    map = L.map(mapEl, { zoomControl: false, maxZoom: 21, minZoom: 8, zoomSnap: 0.25, wheelPxPerZoomLevel: 90, doubleClickZoom: true });
     map.attributionControl.setPrefix(false);
     map.attributionControl.addAttribution('Paths © <a href="https://www.openstreetmap.org/copyright">OSM</a> · Data: <a href="https://www.mountainproject.com">Mountain Project</a>');
     satLayer = L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", {
