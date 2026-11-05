@@ -461,7 +461,7 @@
   };
 
   function initMap() {
-    map = L.map(mapEl, { zoomControl: false, maxZoom: 21, minZoom: 8, zoomSnap: 0.25, wheelPxPerZoomLevel: 90 });
+    map = L.map(mapEl, { zoomControl: false, maxZoom: 21, minZoom: 8, zoomSnap: 0.25, wheelPxPerZoomLevel: 90, doubleClickZoom: false });
     map.attributionControl.setPrefix(false);
     map.attributionControl.addAttribution('Paths © <a href="https://www.openstreetmap.org/copyright">OSM</a> · Data: <a href="https://www.mountainproject.com">Mountain Project</a>');
     satLayer = L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", {
@@ -1609,7 +1609,14 @@
     $("#btn-layer").addEventListener("click", () => toggleSat());
     $("#btn-fit").addEventListener("click", () => (state.area !== "all" ? fitArea(state.area) : fitRegion()));
     $("#btn-offline").addEventListener("click", openOffline);
-    $("#btn-account").addEventListener("click", accountMenu);
+    $("#btn-account").addEventListener("click", () => accountMenu());
+    // Tapping anywhere outside the account menu closes it.
+    document.addEventListener("pointerdown", (e) => {
+      const m = $("#acctmenu");
+      if (!m.hidden && !e.target.closest("#acctmenu, #btn-account")) m.hidden = true;
+    });
+    // iPhone: don't let a pinch on the page chrome (outside the map) zoom the whole page.
+    document.addEventListener("gesturestart", (e) => { if (!e.target.closest?.("#map")) e.preventDefault(); });
     $("#acctmenu").addEventListener("click", (e) => {
       if (e.target.closest("[data-act=signout]")) { window.AtlasAuth?.signOut(); $("#acctmenu").hidden = true; }
     });

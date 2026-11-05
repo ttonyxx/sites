@@ -32,6 +32,8 @@
 
 * { box-sizing: border-box; }
 html, body { height: 100%; margin: 0; }
+/* No double-tap zoom on phones (pinch-zooming the map still works). */
+html { touch-action: manipulation; -webkit-text-size-adjust: 100%; }
 body {
   font: 16px/1.4 var(--sans);
   font-feature-settings: "tnum" 0;
@@ -211,7 +213,7 @@ a { color: var(--accent); }
 .row2 { display: flex; gap: 10px; margin-top: 8px; }
 .sel { display: flex; align-items: center; gap: 6px; font-size: 14px; color: var(--ink-2); flex: 1; font-weight: 500; }
 .sel select {
-  flex: 1; min-width: 0; border: 1px solid var(--line); background: #fff; border-radius: 8px; padding: 5px 6px; font-size: 15px;
+  flex: 1; min-width: 0; border: 1px solid var(--line); background: #fff; border-radius: 8px; padding: 5px 6px; font-size: 16px;
 }
 .sel.area select { font-weight: 600; color: var(--ink); }
 
