@@ -47,7 +47,7 @@ a { color: var(--accent); }
 .muted { color: var(--ink-3); }
 
 /* ------------------------------------------------------------------ map */
-#map { position: fixed; inset: 0; bottom: calc(-1 * var(--ios-gap, 0px)); background: var(--sand); }
+#map { position: fixed; inset: 0; background: var(--sand); }
 #map.sat { background: #4b4338; }
 .leaflet-container { font: inherit; }
 .leaflet-control-attribution { font: 11px/1.4 var(--sans); background: rgba(251, 248, 243, .82) !important; }
@@ -163,7 +163,7 @@ a { color: var(--accent); }
 
 /* ------------------------------------------------------------------ sheet */
 .sheet {
-  position: fixed; z-index: 1100; left: 0; right: 0; bottom: calc(-1 * var(--ios-gap, 0px));
+  position: fixed; z-index: 1100; left: 0; right: 0; bottom: 0;
   height: 88dvh; background: var(--paper);
   border-radius: 18px 18px 0 0; box-shadow: 0 -6px 24px rgba(45, 38, 32, .22);
   display: flex; flex-direction: column;
@@ -374,7 +374,7 @@ a { color: var(--accent); }
 .newl input { flex: 1; min-width: 0; border: 1px solid var(--line); background: #fff; border-radius: 10px; padding: 9px 12px; font-size: 16px; }
 
 /* ------------------------------------------------------------------ offline modal */
-.modal { position: fixed; inset: 0; bottom: calc(-1 * var(--ios-gap, 0px)); z-index: 1250; background: rgba(30, 24, 18, .45); display: grid; place-items: end center; }
+.modal { position: fixed; inset: 0; z-index: 1250; background: rgba(30, 24, 18, .45); display: grid; place-items: end center; }
 .modal[hidden] { display: none; }
 .modal .card {
   width: min(560px, 100%); max-height: 88dvh; overflow-y: auto; background: var(--paper);
@@ -396,6 +396,15 @@ a { color: var(--accent); }
 .ok { color: var(--g0); display: flex; align-items: center; gap: 6px; font-weight: 600; }
 .ok svg { width: 18px; height: 18px; }
 svg.inl { width: 16px; height: 16px; vertical-align: -3px; }
+
+/* iPhone home-screen installs with a translucent status bar: see fixStandaloneGap() in app.js. */
+html.ios-gap, html.ios-gap body { height: 100vh; overflow: hidden; }
+html.ios-gap body { position: relative; }
+html.ios-gap #map, html.ios-gap .modal { position: absolute; }
+html.ios-gap .sheet { position: absolute; bottom: 0; height: 88vh; transform: translateY(calc(88vh - var(--peek))); }
+html.ios-gap .sheet[data-snap="half"] { transform: translateY(calc(88vh - 52vh)); }
+html.ios-gap .sheet[data-snap="full"] { transform: translateY(0); }
+html.ios-gap .topbar, html.ios-gap .mapbtns, html.ios-gap .toast { position: absolute; }
 
 /* ------------------------------------------------------------------ desktop */
 @media (min-width: 900px) {

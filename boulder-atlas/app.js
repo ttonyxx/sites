@@ -23,23 +23,35 @@
   }
   const median = (a) => { const s = [...a].sort((x, y) => x - y); return s.length ? s[Math.floor(s.length / 2)] : null; };
 
-  // iPhone home-screen apps installed while the status bar was translucent draw under the clock but
-  // size the viewport as if the status bar were missing, so everything anchored to the bottom stops
-  // short and leaves an empty band. Measure that band and let the fixed layers extend into it.
-  function fixStandaloneGap() {
+  // iPhone home-screen apps (translucent status bar) draw under the clock, but iOS sizes the viewport
+  // one status bar shorter than the screen and clips fixed-position layers to it, leaving an empty
+  // band at the bottom. iOS still paints the page itself to the real bottom, so in that mode the page
+  // is sized to the full screen (100vh) and the map, sheet and dialogs are laid out inside it (see
+  // html.ios-gap in style.css). iOS settles the viewport a moment after launch, so this re-checks on
+  // resize and shortly after load. Once on it stays on: with the page full height, iOS reports the
+  // full viewport, and switching back would bring the band back.
+  function checkIosGap() {
+    const root = document.documentElement;
+    if (root.classList.contains("ios-gap")) return;
+    const standalone = navigator.standalone === true || matchMedia("(display-mode: standalone)").matches;
+    if (!standalone) return;
     const probe = document.createElement("div");
     probe.style.cssText = "position:fixed;top:0;left:0;width:1px;height:env(safe-area-inset-top);visibility:hidden;pointer-events:none";
     document.body.appendChild(probe);
     const safeTop = probe.offsetHeight;
     probe.remove();
-    const portrait = innerHeight >= innerWidth;
-    const full = portrait ? Math.max(screen.width, screen.height) : Math.min(screen.width, screen.height);
-    const gap = navigator.standalone === true && safeTop > 0 ? Math.round(full - innerHeight) : 0;
-    document.documentElement.style.setProperty("--ios-gap", gap > 0 && gap < 120 ? `${gap}px` : "0px");
+    const full = innerHeight >= innerWidth ? Math.max(screen.width, screen.height) : Math.min(screen.width, screen.height);
+    const gap = safeTop > 0 ? Math.round(full - innerHeight) : 0;
+    if (gap > 0 && gap < 120) {
+      root.classList.add("ios-gap");
+      if (window.__atlas?.map) setTimeout(() => window.__atlas.map.invalidateSize(), 50);
+    }
   }
-  fixStandaloneGap();
-  addEventListener("resize", () => setTimeout(fixStandaloneGap, 120));
-  addEventListener("orientationchange", () => setTimeout(fixStandaloneGap, 300));
+  checkIosGap();
+  addEventListener("resize", checkIosGap);
+  addEventListener("load", () => setTimeout(checkIosGap, 60));
+  setTimeout(checkIosGap, 500);
+  setTimeout(checkIosGap, 1500);
   const plural = (n, w) => `${n.toLocaleString()} ${w}${n === 1 ? "" : "s"}`;
 
   const BUCKETS = [
