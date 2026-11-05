@@ -58,6 +58,20 @@
     return `<span class="stars" title="${s.toFixed(1)} stars">${"★".repeat(full)}<span class="off">${"★".repeat(4 - full)}</span></span>`;
   };
   const safetyHTML = (p) => (p.safety ? `<span class="tag" title="Protection rating">${esc(p.safety)}</span>` : "");
+  const votesHTML = (n) => (n ? `<span class="votes" title="${n.toLocaleString()} rating${n === 1 ? "" : "s"} on Mountain Project">(${n.toLocaleString()})</span>` : "");
+  // A boulder's rating: its problems' stars averaged by how many people rated each, plus the total.
+  const ratingCache = new Map();
+  function boulderRating(b) {
+    if (ratingCache.has(b.id)) return ratingCache.get(b.id);
+    let votes = 0, sum = 0;
+    for (const id of b.problems) {
+      const p = P[id];
+      if (p && p.votes && p.stars != null) { votes += p.votes; sum += p.stars * p.votes; }
+    }
+    const r = { votes, stars: votes ? sum / votes : null };
+    ratingCache.set(b.id, r);
+    return r;
+  }
   const ICON = {
     save: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h12v18l-6-4.5L6 21z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>`,
     saved: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h12v18l-6-4.5L6 21z" fill="currentColor" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>`,
@@ -728,6 +742,7 @@
   const problemSorts = () => ({
     grade: (a, b) => (a.g ?? 99) - (b.g ?? 99) || (b.stars ?? 0) - (a.stars ?? 0),
     stars: (a, b) => (b.stars ?? 0) - (a.stars ?? 0) || b.votes - a.votes,
+    votes: (a, b) => (b.votes || 0) - (a.votes || 0) || (b.stars ?? 0) - (a.stars ?? 0),
     name: (a, b) => a.name.localeCompare(b.name),
     near: (a, b) => distM(state.me, ploc(a)) - distM(state.me, ploc(b)),
     recent: (a, b) => (saved.get(b.id) || 0) - (saved.get(a.id) || 0),
@@ -736,7 +751,7 @@
     const b = B[p.boulder];
     const nv = p.videos?.length || 0;
     const where = state.area === "all" ? `${esc(b.name)} · ${esc(A[b.area]?.name ?? "")}` : esc(b.name);
-    return `<li><button class="item" data-go="p/${p.id}">${gradeHTML(p)}<span class="main"><span class="name">${esc(p.name)}${safetyHTML(p)}${saved.has(p.id) ? `<span class="mark" title="Saved">${ICON.saved}</span>` : ""}${downloaded.has(p.id) ? `<span class="mark dl" title="Downloaded">${ICON.done}</span>` : ""}</span><span class="meta">${starsHTML(p.stars)}${p.height_ft ? ` · ${p.height_ft} ft` : ""}${nv ? ` · <span class="vids">${ICON.play}${nv}</span>` : ""} · ${where}</span></span>${distCell(ploc(p))}</button></li>`;
+    return `<li><button class="item" data-go="p/${p.id}">${gradeHTML(p)}<span class="main"><span class="name">${esc(p.name)}${safetyHTML(p)}${saved.has(p.id) ? `<span class="mark" title="Saved">${ICON.saved}</span>` : ""}${downloaded.has(p.id) ? `<span class="mark dl" title="Downloaded">${ICON.done}</span>` : ""}</span><span class="meta">${starsHTML(p.stars)}${votesHTML(p.votes)}${p.height_ft ? ` · ${p.height_ft} ft` : ""}${nv ? ` · <span class="vids">${ICON.play}${nv}</span>` : ""} · ${where}</span></span>${distCell(ploc(p))}</button></li>`;
   }
   function renderList() {
     if (!REG) return;
@@ -755,7 +770,8 @@
       const lo = (x) => Math.min(...x.ps.map((p) => p.g ?? 0), 99);
       const cmp = {
         grade: (a, b) => lo(a) - lo(b) || b.ps.length - a.ps.length,
-        stars: (a, b) => Math.max(0, ...b.ps.map((p) => p.stars ?? 0)) - Math.max(0, ...a.ps.map((p) => p.stars ?? 0)),
+        stars: (a, b) => Math.max(0, ...b.ps.map((p) => p.stars ?? 0)) - Math.max(0, ...a.ps.map((p) => p.stars ?? 0)) || boulderRating(b.b).votes - boulderRating(a.b).votes,
+        votes: (a, b) => boulderRating(b.b).votes - boulderRating(a.b).votes,
         name: (a, b) => a.b.name.localeCompare(b.b.name),
         near: (a, b) => distM(state.me, a.b) - distM(state.me, b.b),
       }[sort];
@@ -765,7 +781,7 @@
         const gs = all.map((p) => p.g).filter((g) => g != null);
         const lo = all.find((p) => p.g === Math.min(...gs)), hi = all.find((p) => p.g === Math.max(...gs));
         const range = gs.length ? (lo === hi ? lo.grade : `${lo.grade.split(" ")[0]}–${hi.grade.split(" ")[0]}`) : "";
-        return `<li><button class="item" data-go="b/${b.id}"><span class="thumb">${boulderSVG(b, { mini: true })}</span><span class="main"><span class="name">${esc(b.name)}</span><span class="meta">${ps.length < all.length ? `${ps.length} of ` : ""}${plural(all.length, "problem")} · ${esc(range)} · ${esc(state.area === "all" ? A[b.area]?.name : b.sector)}</span></span>${distCell(b)}</button></li>`;
+        return `<li><button class="item" data-go="b/${b.id}"><span class="thumb">${boulderSVG(b, { mini: true })}</span><span class="main"><span class="name">${esc(b.name)}</span><span class="meta">${boulderRating(b).votes ? `${starsHTML(boulderRating(b).stars)}${votesHTML(boulderRating(b).votes)} · ` : ""}${ps.length < all.length ? `${ps.length} of ` : ""}${plural(all.length, "problem")} · ${esc(range)} · ${esc(state.area === "all" ? A[b.area]?.name : b.sector)}</span></span>${distCell(b)}</button></li>`;
       }).join("") || `<li class="empty">No boulders match.</li>`;
     } else {
       const ids = [LIST_SAVED, ...[...lists.keys()].sort((a, b) => (lists.get(b).updated || 0) - (lists.get(a).updated || 0))];
@@ -860,6 +876,7 @@
         </div>
         <div class="facts">
           <span><b>${ps.length}</b> problem${ps.length === 1 ? "" : "s"}</span>
+          ${boulderRating(b).votes ? `<span>${starsHTML(boulderRating(b).stars)} <b>${boulderRating(b).votes.toLocaleString()}</b> rating${boulderRating(b).votes === 1 ? "" : "s"}</span>` : ""}
           ${gs.length ? `<span>${esc(ps.find((p) => p.g === Math.min(...gs)).grade.split(" ")[0])} – ${esc(ps.find((p) => p.g === Math.max(...gs)).grade.split(" ")[0])}</span>` : ""}
           <span>Tallest <b>${L.anyKnown ? "" : "~"}${Math.round(L.Hmax)} ft</b></span>
           ${best && best.stars ? `<span>Classic: <b>${esc(best.name)}</b></span>` : ""}
@@ -873,7 +890,7 @@
                 <span class="num" style="--c:${colorOf(p.g)}">${i + 1}</span>
                 <span class="main">
                   <span class="name">${esc(p.name)}</span>${safetyHTML(p)}${saved.has(p.id) ? `<span class="mark">${ICON.saved}</span>` : ""}
-                  <span class="meta">${starsHTML(p.stars)}${p.votes ? ` <span class="muted">(${p.votes})</span>` : ""}${p.height_ft ? ` · ${p.height_ft} ft` : ""}${p.font ? ` · Font ${esc(p.font)}` : ""}${p.videos?.length ? ` · <span class="vids">${ICON.play}${p.videos.length}</span>` : ""}</span>
+                  <span class="meta">${starsHTML(p.stars)}${votesHTML(p.votes)}${p.height_ft ? ` · ${p.height_ft} ft` : ""}${p.font ? ` · Font ${esc(p.font)}` : ""}${p.videos?.length ? ` · <span class="vids">${ICON.play}${p.videos.length}</span>` : ""}</span>
                 </span>
                 ${gradeHTML(p)}
               </button>
@@ -1113,7 +1130,7 @@
         ${groups.map((g, i) => `
           <li class="lb">
             <button class="lbh" data-go="b/${g.b.id}"><span class="pinno">${i + 1}</span><span class="main"><span class="name">${esc(g.b.name)}</span><span class="meta">${esc(A[g.b.area]?.name ?? "")}${g.b.sector && g.b.sector !== A[g.b.area]?.name ? ` · ${esc(g.b.sector)}` : ""}</span></span>${distCell(g.b)}</button>
-            <ul>${g.ps.map((p) => `<li><button class="lp" data-go="p/${p.id}">${gradeHTML(p)}<span class="main"><span class="name">${esc(p.name)}${safetyHTML(p)}${downloaded.has(p.id) ? `<span class="mark dl" title="Downloaded">${ICON.done}</span>` : ""}</span><span class="meta">${starsHTML(p.stars)}${p.height_ft ? ` · ${p.height_ft} ft` : ""}${p.videos?.length ? ` · <span class="vids">${ICON.play}${p.videos.length}</span>` : ""}</span></span></button>${shared ? "" : `<button class="rm" data-act="rm-from-list" data-pid="${p.id}" aria-label="Remove ${esc(p.name)} from this list">×</button>`}</li>`).join("")}</ul>
+            <ul>${g.ps.map((p) => `<li><button class="lp" data-go="p/${p.id}">${gradeHTML(p)}<span class="main"><span class="name">${esc(p.name)}${safetyHTML(p)}${downloaded.has(p.id) ? `<span class="mark dl" title="Downloaded">${ICON.done}</span>` : ""}</span><span class="meta">${starsHTML(p.stars)}${votesHTML(p.votes)}${p.height_ft ? ` · ${p.height_ft} ft` : ""}${p.videos?.length ? ` · <span class="vids">${ICON.play}${p.videos.length}</span>` : ""}</span></span></button>${shared ? "" : `<button class="rm" data-act="rm-from-list" data-pid="${p.id}" aria-label="Remove ${esc(p.name)} from this list">×</button>`}</li>`).join("")}</ul>
           </li>`).join("") || `<li class="empty">${v.id === LIST_SAVED ? "Nothing saved yet. Open any problem and tap <b>Save</b>." : "This list is empty. Open any problem and tap <b>Add to list</b>."}</li>`}
       </ol>`;
     drawListPins(groups);

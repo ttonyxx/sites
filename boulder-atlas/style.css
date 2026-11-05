@@ -245,6 +245,7 @@ a { color: var(--accent); }
 }
 .stars { color: #d08700; letter-spacing: -1px; font-size: 12.5px; }
 .stars .off { color: #d9cfc2; }
+.votes { color: var(--ink-3); font-size: .92em; margin-left: 3px; font-variant-numeric: tabular-nums; }
 .tag { display: inline-block; font: 700 11px/1.4 var(--cond); border-radius: 4px; padding: 0 4px; background: #fde2e1; color: #a61b1b; margin-left: 5px; vertical-align: 2px; }
 
 .credits { flex: none; font-size: 12px; color: var(--ink-3); padding: 8px 14px calc(10px + var(--safe-b)); border-top: 1px solid var(--line); }
