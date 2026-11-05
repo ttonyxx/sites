@@ -319,6 +319,36 @@ for aid, a in areas.items():
 area_list = sorted((a for a in areas.values() if a.get("boulders")), key=lambda a: -a["problems"])
 
 # ------------------------------------------------------------------ OSM paths
+def simplify(pts, tol_m=1.5):
+    """Douglas-Peucker in a local metric projection: drops points that change the line by < tol_m."""
+    if len(pts) < 3:
+        return pts
+    lat0 = math.radians(sum(p[0] for p in pts) / len(pts))
+    xy = [(p[1] * 111320 * math.cos(lat0), p[0] * 111320) for p in pts]
+    keep = [False] * len(pts)
+    keep[0] = keep[-1] = True
+    stack = [(0, len(pts) - 1)]
+    while stack:
+        a, b = stack.pop()
+        (ax, ay), (bx, by) = xy[a], xy[b]
+        dx, dy = bx - ax, by - ay
+        L2 = dx * dx + dy * dy
+        best, bi = 0.0, -1
+        for i in range(a + 1, b):
+            px, py = xy[i]
+            if L2 == 0:
+                d = math.hypot(px - ax, py - ay)
+            else:
+                t = max(0, min(1, ((px - ax) * dx + (py - ay) * dy) / L2))
+                d = math.hypot(px - (ax + t * dx), py - (ay + t * dy))
+            if d > best:
+                best, bi = d, i
+        if best > tol_m and bi > 0:
+            keep[bi] = True
+            stack += [(a, bi), (bi, b)]
+    return [p for p, k in zip(pts, keep) if k]
+
+
 paths = []
 osm = json.load(open(args.osm))
 for e in osm.get("elements", []):
@@ -335,7 +365,8 @@ for e in osm.get("elements", []):
         kind = "track"
     else:
         kind = "trail"
-    paths.append({"k": kind, "n": e["tags"].get("name") or e["tags"].get("ref"), "c": [[round(pt["lat"], 5), round(pt["lon"], 5)] for pt in e["geometry"]]})
+    coords = [[round(pt["lat"], 5), round(pt["lon"], 5)] for pt in e["geometry"]]
+    paths.append({"k": kind, "n": e["tags"].get("name") or e["tags"].get("ref"), "c": simplify(coords, 3.0 if kind == "hwy" else 1.5)})
 
 region = {
     "id": args.id,

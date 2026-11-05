@@ -51,14 +51,11 @@ a { color: var(--accent); }
 #map.sat { background: #4b4338; }
 .leaflet-container { font: inherit; }
 .leaflet-control-attribution { font: 11px/1.4 var(--sans); background: rgba(251, 248, 243, .82) !important; }
-.leaflet-boulders-pane svg { filter: drop-shadow(1px 1.5px 0 rgba(45, 38, 32, .25)); }
-#map.sat .leaflet-boulders-pane svg { filter: drop-shadow(0 0 2px rgba(0, 0, 0, .55)); }
-.leaflet-boulders-pane path.leaflet-interactive { cursor: pointer; }
+.leaflet-boulders-pane canvas { cursor: pointer; }
 
 /* Constant-size dots stand in for boulders until their real footprint is big enough to tap. */
 .bdot {
   border-radius: 50%; background: var(--rock); border: 1.5px solid #4a3a2a;
-  box-shadow: 0 1px 1px rgba(45, 38, 32, .3); transition: opacity .2s, transform .2s;
 }
 #map.sat .bdot { background: #fff3dc; border-color: #fff; box-shadow: 0 0 0 1.5px rgba(0,0,0,.45); }
 #map.z-near .bdot, #map.z-far .bdot { opacity: 0; pointer-events: none; }
@@ -68,14 +65,14 @@ a { color: var(--accent); }
 .blabel span {
   position: absolute; left: 0; top: 2px; transform: translateX(-50%);
   white-space: nowrap; font: 600 12.5px/1.1 var(--cond); letter-spacing: .01em; color: var(--ink);
-  text-shadow: 0 0 2px #fff, 0 0 2px #fff, 0 0 3px #fff, 0 0 4px #fff;
-  opacity: 0; transition: opacity .2s;
+  text-shadow: 0 0 2px #fff, 0 0 3px #fff;
+  opacity: 0;
 }
 .blabel i { font-style: normal; font-weight: 600; color: var(--ink-3); }
 #map.z-labels .blabel span { opacity: 1; }
 #map.z-labels .blabel.dim span, #map.z-labels .blabel.hide span { opacity: 0; }
 #map:not(.z-areas) .blabel.sel span { opacity: 1; font-size: 14px; }
-#map.sat .blabel span { color: #fff; text-shadow: 0 0 3px #000, 0 0 2px #000, 0 1px 3px #000; }
+#map.sat .blabel span { color: #fff; text-shadow: 0 0 3px #000, 0 1px 2px #000; }
 #map.sat .blabel i { color: #e9dcc8; }
 
 .alabel button {
@@ -174,6 +171,20 @@ a { color: var(--accent); }
 }
 .sheet[data-snap="half"] { transform: translateY(calc(88dvh - 52dvh)); }
 .sheet[data-snap="full"] { transform: translateY(0); }
+.sheet[data-snap="hidden"] { transform: translateY(calc(100% + 24px)); }
+.sheet-hide {
+  position: absolute; right: 8px; top: 2px; width: 36px; height: 30px; border: 0; border-radius: 10px;
+  background: transparent; color: var(--ink-3); display: grid; place-items: center; cursor: pointer;
+}
+.sheet-hide svg { width: 22px; height: 22px; }
+.sheet-fab {
+  position: fixed; z-index: 1050; left: 50%; bottom: calc(16px + var(--safe-b)); transform: translateX(-50%);
+  display: none; align-items: center; gap: 7px; padding: 11px 20px 11px 16px; border-radius: 999px;
+  border: 1px solid var(--line); background: var(--paper); color: var(--ink); cursor: pointer;
+  font: 600 16px/1 var(--sans); box-shadow: 0 4px 16px rgba(45, 38, 32, .28);
+}
+.sheet-fab svg { width: 20px; height: 20px; }
+body.sheet-hidden .sheet-fab { display: inline-flex; }
 .sheet.dragging { transition: none; }
 .handle { flex: none; height: 24px; display: grid; place-items: center; cursor: grab; touch-action: none; }
 .handle span { width: 40px; height: 5px; border-radius: 3px; background: #cbbfae; }
@@ -404,6 +415,22 @@ html.ios-gap #map, html.ios-gap .modal { position: absolute; }
 html.ios-gap .sheet { position: absolute; bottom: 0; height: 88vh; transform: translateY(calc(88vh - var(--peek))); }
 html.ios-gap .sheet[data-snap="half"] { transform: translateY(calc(88vh - 52vh)); }
 html.ios-gap .sheet[data-snap="full"] { transform: translateY(0); }
+html.ios-gap .sheet[data-snap="hidden"] { transform: translateY(calc(100% + 24px)); }
+html.ios-gap .sheet-fab { position: absolute; }
+.sheet[data-snap="hidden"] { transform: translateY(calc(100% + 24px)); }
+.sheet-hide {
+  position: absolute; right: 8px; top: 2px; width: 36px; height: 30px; border: 0; border-radius: 10px;
+  background: transparent; color: var(--ink-3); display: grid; place-items: center; cursor: pointer;
+}
+.sheet-hide svg { width: 22px; height: 22px; }
+.sheet-fab {
+  position: fixed; z-index: 1050; left: 50%; bottom: calc(16px + var(--safe-b)); transform: translateX(-50%);
+  display: none; align-items: center; gap: 7px; padding: 11px 20px 11px 16px; border-radius: 999px;
+  border: 1px solid var(--line); background: var(--paper); color: var(--ink); cursor: pointer;
+  font: 600 16px/1 var(--sans); box-shadow: 0 4px 16px rgba(45, 38, 32, .28);
+}
+.sheet-fab svg { width: 20px; height: 20px; }
+body.sheet-hidden .sheet-fab { display: inline-flex; }
 html.ios-gap .topbar, html.ios-gap .mapbtns, html.ios-gap .toast { position: absolute; }
 
 /* ------------------------------------------------------------------ desktop */
@@ -412,7 +439,7 @@ html.ios-gap .topbar, html.ios-gap .mapbtns, html.ios-gap .toast { position: abs
     top: 12px; left: 12px; bottom: 12px; right: auto; width: var(--sheet-w); height: auto;
     border-radius: 16px; transform: none !important; box-shadow: 0 4px 24px rgba(45,38,32,.2);
   }
-  .handle { display: none; }
+  .handle, .sheet-hide, .sheet-fab { display: none !important; }
   .controls { padding-top: 14px; }
   .dhead { padding-top: 14px; }
   .topbar { left: calc(var(--sheet-w) + 24px); }
@@ -422,6 +449,7 @@ html.ios-gap .topbar, html.ios-gap .mapbtns, html.ios-gap .toast { position: abs
 }
 @media (max-width: 899px) {
   .leaflet-bottom { bottom: calc(178px + var(--safe-b)); }
+  body.sheet-hidden .leaflet-bottom { bottom: calc(72px + var(--safe-b)); }
 }
 @media (max-width: 440px) {
   .acct:not(.in) { width: 34px; padding: 0; justify-content: center; }

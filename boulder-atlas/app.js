@@ -317,11 +317,11 @@
       if (!mini) {
         let t = "";
         const w = g.x1 - g.x0;
-        for (let k = 0; k < Math.round(w / 6) + 1; k++) {
+        for (let k = 0; k < Math.min(14, Math.round(w / 6) + 1); k++) {
           const sx = g.x0 + r() * w, sy = g.H * (0.5 + r() * 0.5);
           t += `<path d="M${sx * S},${-sy * S} q${(r() - 0.5) * 20},${g.H * S * 0.25} ${(r() - 0.5) * 30},${g.H * S * (0.3 + r() * 0.4)}" stroke="#7d5f40" stroke-opacity=".22" stroke-width="${6 + r() * 10}" fill="none" stroke-linecap="round"/>`;
         }
-        for (let k = 0; k < w * g.H * 0.35; k++) {
+        for (let k = 0; k < Math.min(160, w * g.H * 0.35); k++) {
           t += `<circle cx="${(g.x0 + r() * w) * S}" cy="${-r() * g.H * S}" r="${1.2 + r() * 2}" fill="${r() < 0.5 ? "#fff" : "#4a3a2a"}" fill-opacity=".28"/>`;
         }
         t += `<path d="${smoothPath(pts.slice(1, -1).map(([x, y]) => [x, y + 6]))}" stroke="#fff" stroke-opacity=".35" stroke-width="5" fill="none"/>`;
@@ -398,8 +398,13 @@
   }
 
   // ------------------------------------------------------------------ map
-  let map, satLayer;
+  let map, satLayer, pathRenderer, boulderRenderer;
   const polys = {}, dots = {}, labels = {}, areaMarkers = {}, pathLayers = [];
+  // Performance: paths and boulder shapes are drawn on canvas (cheap to pan and zoom on phones), and
+  // the HTML markers (dots, names) only exist for boulders near the screen (see syncMarkers).
+  const shown = { dots: new Set(), labels: new Set() };
+  const polyKey = {};
+  let visSet = null;
   let meMarker, meCircle;
   const mapEl = $("#map");
   const isDesktop = () => matchMedia("(min-width: 900px)").matches;
@@ -437,29 +442,21 @@
       map.createPane(n).style.zIndex = z;
     });
     map.getPane("labels").style.pointerEvents = "none";
+    pathRenderer = L.canvas({ pane: "paths", padding: 0.3 });
+    boulderRenderer = L.canvas({ pane: "boulders", padding: 0.3, tolerance: 6 });
 
     const order = { hwy: 0, road: 1, track: 2, trail: 3 };
     [...REG.paths].sort((a, b) => order[a.k] - order[b.k]).forEach((p) => {
       const styles = PATH[p.k] || PATH.trail;
       styles.forEach((st, i) => {
-        const line = L.polyline(p.c, { ...st, pane: "paths", interactive: false, lineCap: "round", lineJoin: "round" }).addTo(map);
+        const line = L.polyline(p.c, { ...st, pane: "paths", renderer: pathRenderer, interactive: false, lineCap: "round", lineJoin: "round", smoothFactor: 1.5 }).addTo(map);
         pathLayers.push({ line, kind: p.k, i });
       });
     });
 
-    const pick = (b) => () => go(`b/${b.id}`);
     REG.boulders.forEach((b) => {
-      const ring = footprint(b);
-      polys[b.id] = L.polygon(ring, { pane: "boulders", ...POLY.simple, bubblingMouseEvents: false }).on("click", pick(b)).addTo(map);
-      dots[b.id] = L.marker([b.lat, b.lon], {
-        pane: "dots", keyboard: false, title: b.name,
-        icon: L.divIcon({ className: "bdot", iconSize: [12, 12] }),
-      }).on("click", pick(b)).addTo(map);
-      const south = Math.min(...ring.map((p) => p[0]));
-      labels[b.id] = L.marker([south, b.lon], {
-        pane: "labels", interactive: false, keyboard: false,
-        icon: L.divIcon({ className: "blabel", iconSize: [0, 0], html: `<span>${esc(b.name)} <i>${b.problems.length}</i></span>` }),
-      }).addTo(map);
+      polys[b.id] = L.polygon(footprint(b), { pane: "boulders", renderer: boulderRenderer, ...POLY.simple, bubblingMouseEvents: false })
+        .on("click", () => go(`b/${b.id}`)).addTo(map);
     });
     REG.areas.forEach((a) => {
       areaMarkers[a.id] = L.marker([a.lat, a.lon], {
@@ -470,7 +467,7 @@
 
     map.on("zoomend", onZoom);
     map.on("moveend", () => {
-      declutterLabels();
+      syncMarkers();
       const c = map.getCenter();
       store.set("view", { lat: c.lat, lon: c.lng, z: map.getZoom(), region: REG.id });
     });
@@ -501,13 +498,60 @@
     cl.toggle("z-near", z >= 17.75);
     cl.toggle("z-labels", z >= 18.25);
     declutterAreas();
+    syncMarkers();
+  }
+
+  // Dots (zoomed out) and names (zoomed in) are HTML, so only boulders near the screen get them.
+  function dotFor(b) {
+    return dots[b.id] || (dots[b.id] = L.marker([b.lat, b.lon], {
+      pane: "dots", keyboard: false, title: b.name,
+      icon: L.divIcon({ className: "bdot", iconSize: [12, 12] }),
+    }).on("click", () => go(`b/${b.id}`)));
+  }
+  function labelFor(b) {
+    if (labels[b.id]) return labels[b.id];
+    const south = Math.min(...footprint(b).map((p) => p[0]));
+    return (labels[b.id] = L.marker([south, b.lon], {
+      pane: "labels", interactive: false, keyboard: false,
+      icon: L.divIcon({ className: "blabel", iconSize: [0, 0], html: `<span>${esc(b.name)} <i>${b.problems.length}</i></span>` }),
+    }));
+  }
+  function paintMarker(m, b) {
+    const el = m.getElement();
+    if (!el) return;
+    el.classList.toggle("dim", !!visSet && !visSet.has(b.id));
+    el.classList.toggle("sel", b.id === state.sel);
+  }
+  function setShown(kind, b, on) {
+    const set = shown[kind];
+    if (on) {
+      const m = kind === "dots" ? dotFor(b) : labelFor(b);
+      if (!set.has(b.id)) { m.addTo(map); set.add(b.id); }
+      paintMarker(m, b);
+      const sel = b.id === state.sel;
+      if (kind === "dots" && m._atlasSel !== sel) { m.setZIndexOffset(sel ? 1000 : 0); m._atlasSel = sel; }
+    } else if (set.has(b.id)) {
+      (kind === "dots" ? dots : labels)[b.id].remove();
+      set.delete(b.id);
+    }
+  }
+  function syncMarkers() {
+    if (!map || !REG || !map._loaded) return; // nothing to place until the map has a view
+    const z = map.getZoom();
+    const view = map.getBounds().pad(0.4);
+    const dotsOn = z >= 12.75 && z < 17.75, labelsOn = z >= 18.25;
+    for (const b of REG.boulders) {
+      const near = (dotsOn || labelsOn) && view.contains([b.lat, b.lon]);
+      const sel = b.id === state.sel;
+      setShown("dots", b, (dotsOn && near) || (sel && z < 17.75));
+      setShown("labels", b, (labelsOn && near) || (sel && z >= 14.75));
+    }
     declutterLabels();
   }
   // Boulder names: when two would overlap, keep the selected boulder's, then the one with more problems.
   function declutterLabels() {
-    if (!mapEl.classList.contains("z-labels")) return;
-    const view = map.getBounds().pad(0.25);
-    const items = REG.boulders.filter((b) => view.contains([b.lat, b.lon]));
+    if (!shown.labels.size) return;
+    const items = [...shown.labels].map((id) => B[id]);
     items.sort((a, b) => (b.id === state.sel) - (a.id === state.sel) || b.problems.length - a.problems.length);
     const placed = [];
     for (const b of items) {
@@ -586,23 +630,22 @@
     highlight();
   }
 
+  // Only restyle shapes whose state changed (dimmed / selected / satellite), then refresh markers.
   function highlight() {
     if (!map) return;
-    const vis = state.listBoulders || new Set(filteredBoulders().map((x) => x.b.id));
+    visSet = state.listBoulders || new Set(filteredBoulders().map((x) => x.b.id));
+    const sat = isSat();
     for (const b of REG.boulders) {
-      const dim = !vis.has(b.id), sel = b.id === state.sel;
-      polys[b.id].setStyle(polyStyle(b.id, dim));
-      if (sel) polys[b.id].bringToFront();
-      for (const m of [dots[b.id], labels[b.id]]) {
-        const el = m.getElement();
-        if (!el) continue;
-        el.classList.toggle("dim", dim);
-        el.classList.toggle("sel", sel);
+      const dim = !visSet.has(b.id), sel = b.id === state.sel;
+      const key = (dim ? 1 : 0) | (sel ? 2 : 0) | (sat ? 4 : 0);
+      if (polyKey[b.id] !== key) {
+        polys[b.id].setStyle(polyStyle(b.id, dim));
+        if (sel) polys[b.id].bringToFront();
+        polyKey[b.id] = key;
       }
-      dots[b.id].setZIndexOffset(sel ? 1000 : 0);
     }
+    syncMarkers();
     for (const [aid, m] of Object.entries(areaMarkers)) m.getElement()?.classList.toggle("sel", aid === state.area);
-    declutterLabels();
   }
 
   // ------------------------------------------------------------------ location
@@ -628,7 +671,7 @@
     $("#btn-locate").classList.add("on");
     const ll = [lat, lon];
     if (!meMarker) {
-      meCircle = L.circle(ll, { radius: acc, color: "#1d6fd1", weight: 1, fillOpacity: 0.1, interactive: false, pane: "paths" }).addTo(map);
+      meCircle = L.circle(ll, { radius: acc, color: "#1d6fd1", weight: 1, fillOpacity: 0.1, interactive: false, pane: "paths", renderer: pathRenderer }).addTo(map);
       meMarker = L.marker(ll, {
         icon: L.divIcon({ className: "me-icon", iconSize: [0, 0], html: `<svg class="me-cone" viewBox="-30 -30 60 60"><defs><radialGradient id="cone"><stop offset="0" stop-color="#1d6fd1" stop-opacity=".55"/><stop offset="1" stop-color="#1d6fd1" stop-opacity="0"/></radialGradient></defs><path d="M0,0 L-14,-28 A31,31 0 0 1 14,-28 Z" fill="url(#cone)"/></svg><div class="me-dot"></div>` }),
         interactive: false, keyboard: false, pane: "me",
@@ -652,7 +695,7 @@
     const moved = !prev || distM(prev, state.me) > 4;
     if (moved && Date.now() - lastListUpdate > 2500) {
       lastListUpdate = Date.now();
-      if (state.sort === "near") renderList();
+      if (state.sort === "near" && $("#list").scrollTop < 40 && !state.sel && !state.listView) renderList();
       else updateListDistances();
       if (state.sel) updateWhere();
     }
@@ -777,7 +820,10 @@
     $("#filters").hidden = state.tab === "lists";
     if (state.tab === "problems") {
       nP.sort(problemSorts()[sort]);
-      html = nP.map(problemRow).join("") || `<li class="empty">No problems match. Try clearing filters.</li>`;
+      if (!nP.length) list.innerHTML = `<li class="empty">No problems match. Try clearing filters.</li>`;
+      else pageRows(nP, problemRow);
+      highlight();
+      return;
     } else if (state.tab === "boulders") {
       const lo = (x) => Math.min(...x.ps.map((p) => p.g ?? 0), 99);
       const cmp = {
@@ -788,13 +834,10 @@
         near: (a, b) => distM(state.me, a.b) - distM(state.me, b.b),
       }[sort];
       nB.sort(cmp);
-      html = nB.map(({ b, ps }) => {
-        const all = b.problems.map((id) => P[id]);
-        const gs = all.map((p) => p.g).filter((g) => g != null);
-        const lo = all.find((p) => p.g === Math.min(...gs)), hi = all.find((p) => p.g === Math.max(...gs));
-        const range = gs.length ? (lo === hi ? lo.grade : `${lo.grade.split(" ")[0]}–${hi.grade.split(" ")[0]}`) : "";
-        return `<li><button class="item" data-go="b/${b.id}"><span class="thumb">${boulderSVG(b, { mini: true })}</span><span class="main"><span class="name">${esc(b.name)}</span><span class="meta">${boulderRating(b).votes ? `${starsHTML(boulderRating(b).stars)}${votesHTML(boulderRating(b).votes)} · ` : ""}${ps.length < all.length ? `${ps.length} of ` : ""}${plural(all.length, "problem")} · ${esc(range)} · ${esc(state.area === "all" ? A[b.area]?.name : b.sector)}</span></span>${distCell(b)}</button></li>`;
-      }).join("") || `<li class="empty">No boulders match.</li>`;
+      if (!nB.length) list.innerHTML = `<li class="empty">No boulders match.</li>`;
+      else pageRows(nB, boulderRow);
+      highlight();
+      return;
     } else {
       const ids = [LIST_SAVED, ...[...lists.keys()].sort((a, b) => (lists.get(b).updated || 0) - (lists.get(a).updated || 0))];
       html = `<li class="lhead"><div><b>Your lists</b><span class="muted">Open a list to see its boulders on the map.</span></div><button class="pill" data-act="new-list">${ICON.plus}<span>New list</span></button></li>` +
@@ -810,8 +853,35 @@
         }).join("") +
         `<li class="savedhead"><div class="sync">${state.user ? `Your lists sync to ${esc(state.user.email || state.user.name)}.` : window.AtlasAuth ? `<button class="link" data-act="signin">Sign in with Google</button> to keep your lists on every device.` : "Lists are kept on this device."} Sharing a list creates a link anyone can open, no account needed.</div></li>`;
     }
+    pageFn = null;
     list.innerHTML = html;
     highlight();
+  }
+
+  function boulderRow({ b, ps }) {
+    const all = b.problems.map((id) => P[id]);
+    const gs = all.map((p) => p.g).filter((g) => g != null);
+    const lo = all.find((p) => p.g === Math.min(...gs)), hi = all.find((p) => p.g === Math.max(...gs));
+    const range = gs.length ? (lo === hi ? lo.grade : `${lo.grade.split(" ")[0]}–${hi.grade.split(" ")[0]}`) : "";
+    const r = boulderRating(b);
+    return `<li><button class="item" data-go="b/${b.id}"><span class="thumb">${boulderSVG(b, { mini: true })}</span><span class="main"><span class="name">${esc(b.name)}</span><span class="meta">${r.votes ? `${starsHTML(r.stars)}${votesHTML(r.votes)} · ` : ""}${ps.length < all.length ? `${ps.length} of ` : ""}${plural(all.length, "problem")} · ${esc(range)} · ${esc(state.area === "all" ? A[b.area]?.name : b.sector)}</span></span>${distCell(b)}</button></li>`;
+  }
+
+  // Long lists render 60 rows at a time; more are added as you scroll near the end.
+  const PAGE = 60;
+  let pageItems = [], pageFn = null, pageShown = 0;
+  function pageRows(items, fn) {
+    pageItems = items;
+    pageFn = fn;
+    pageShown = 0;
+    $("#list").innerHTML = "";
+    morePageRows();
+  }
+  function morePageRows() {
+    if (!pageFn || pageShown >= pageItems.length) return;
+    const next = pageItems.slice(pageShown, pageShown + PAGE);
+    pageShown += next.length;
+    $("#list").insertAdjacentHTML("beforeend", next.map(pageFn).join(""));
   }
 
   function distCell(loc) {
@@ -1266,7 +1336,13 @@
   // ------------------------------------------------------------------ bottom sheet
   const sheet = $("#sheet");
   const SNAPS = ["peek", "half", "full"];
-  function setSnap(s) { sheet.dataset.snap = s; }
+  // "hidden" slides the sheet fully off the screen (drag it down past the peek, or tap the hide
+  // button); the floating List button brings it back.
+  function setSnap(s) {
+    sheet.dataset.snap = s;
+    document.body.classList.toggle("sheet-hidden", s === "hidden");
+    if (s === "hidden") $("#q").blur();
+  }
   function initSheet() {
     const handle = $("#handle");
     let startY = 0, startT = 0, dragging = false, moved = false, lastY = 0, lastT = 0, vel = 0;
@@ -1285,7 +1361,7 @@
       const now = performance.now();
       vel = (e.clientY - lastY) / Math.max(1, now - lastT);
       lastY = e.clientY; lastT = now;
-      sheet.style.transform = `translateY(${clamp(startT + dy, 0, sheet.offsetHeight - 120)}px)`;
+      sheet.style.transform = `translateY(${clamp(startT + dy, 0, sheet.offsetHeight)}px)`;
     });
     const end = () => {
       if (!dragging) return;
@@ -1295,7 +1371,8 @@
       sheet.style.transform = "";
       if (!moved) { setSnap(SNAPS[(SNAPS.indexOf(sheet.dataset.snap) + 1) % 3]); return; }
       const h = sheet.offsetHeight;
-      const pos = { peek: h - 178, half: h - innerHeight * 0.52, full: 0 };
+      const peekPx = parseFloat(getComputedStyle(sheet).getPropertyValue("--peek")) || 178;
+      const pos = { hidden: h, peek: h - peekPx, half: h - innerHeight * 0.52, full: 0 };
       let best = "half", bd = Infinity;
       const proj = t + vel * 180;
       for (const [k, v] of Object.entries(pos)) if (Math.abs(proj - v) < bd) { bd = Math.abs(proj - v); best = k; }
@@ -1306,6 +1383,8 @@
     handle.addEventListener("keydown", (e) => {
       if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setSnap(SNAPS[(SNAPS.indexOf(sheet.dataset.snap) + 1) % 3]); }
     });
+    $("#sheet-hide").addEventListener("click", () => setSnap("hidden"));
+    $("#btn-sheet").addEventListener("click", () => setSnap("peek"));
   }
 
   // ------------------------------------------------------------------ toast + online state
@@ -1351,7 +1430,15 @@
 
   // ------------------------------------------------------------------ wire up
   function bind() {
-    $("#q").addEventListener("input", (e) => { state.q = e.target.value.trim(); renderList(); $("#list").scrollTop = 0; });
+    let qTimer;
+    $("#q").addEventListener("input", (e) => {
+      clearTimeout(qTimer);
+      qTimer = setTimeout(() => { state.q = e.target.value.trim(); renderList(); $("#list").scrollTop = 0; }, 140);
+    });
+    $("#list").addEventListener("scroll", () => {
+      const l = $("#list");
+      if (l.scrollTop + l.clientHeight > l.scrollHeight - 600) morePageRows();
+    }, { passive: true });
     $("#q").addEventListener("focus", () => { if (!isDesktop()) setSnap("full"); });
     $$(".tabs button").forEach((btn) => btn.addEventListener("click", () => {
       state.tab = btn.dataset.tab;
@@ -1533,6 +1620,21 @@
     startLocate(false);
     if ("serviceWorker" in navigator && (location.protocol === "https:" || location.hostname === "localhost")) {
       navigator.serviceWorker.register("sw.js").then(() => cacheRegion()).catch(() => {});
+      // The app opens from the saved copy; if the background check finds a newer version right after
+      // launch, switch to it (at most once a minute, so a flaky server can't cause a reload loop).
+      let told = false;
+      navigator.serviceWorker.addEventListener("message", (e) => {
+        if (e.data?.type !== "atlas-updated") return;
+        let last = 0;
+        try { last = +sessionStorage.getItem("atlas:reloaded") || 0; } catch { /* ignore */ }
+        if (performance.now() < 8000 && !state.sel && !state.listView && Date.now() - last > 60000) {
+          try { sessionStorage.setItem("atlas:reloaded", String(Date.now())); } catch { /* ignore */ }
+          location.reload();
+        } else if (!told) {
+          told = true;
+          toast("Boulder Atlas updated. It will use the new version next time you open it.", 4000);
+        }
+      });
     }
   }
 
