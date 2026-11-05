@@ -241,8 +241,12 @@ a { color: var(--accent); }
 /* Saved / listed climbs stand out while scrolling: a colored edge on the row. */
 .list li.kept-saved > .item { background: #fffaf0; box-shadow: inset 4px 0 0 #e0a526; }
 .list li.kept-list > .item { background: #f5f9ff; box-shadow: inset 4px 0 0 var(--accent); }
-.plist li.kept-saved:not(.on) { box-shadow: inset 4px 0 0 #e0a526; }
-.plist li.kept-list:not(.on) { box-shadow: inset 4px 0 0 var(--accent); }
+.inpick { margin-top: 8px; background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 2px 12px 10px; }
+.inpick .pick { margin: 0; }
+.inpick .pick li:first-child { border-top: 0; }
+.inpick .pick label { padding: 9px 0; font-size: 15.5px; }
+.inpick .newl { margin: 6px 0 0; }
+[data-act=addlist][aria-expanded="true"] { border-color: var(--accent); color: var(--accent); }
 .vids { display: inline-flex; align-items: center; gap: 1px; color: #c4302b; font-weight: 600; }
 .vids svg { width: 13px; height: 13px; }
 
@@ -310,15 +314,23 @@ a { color: var(--accent); }
 .prob .main { flex: 1; min-width: 0; }
 .prob .name { font-weight: 600; font-size: 16.5px; }
 .prob .meta { display: block; font-size: 13.5px; color: var(--ink-2); }
-.plist .more { display: none; padding: 0 2px 14px 37px; font-size: 14.5px; color: var(--ink-2); }
+/* A climb's details grow open smoothly (grid 0fr -> 1fr) instead of popping in. */
+.plist .more {
+  display: grid; grid-template-rows: 0fr; opacity: 0; visibility: hidden;
+  transition: grid-template-rows .32s var(--ease), opacity .22s ease, visibility 0s linear .32s;
+}
+.plist .more-in { min-height: 0; overflow: hidden; padding: 0 2px 0 37px; font-size: 14.5px; color: var(--ink-2); }
+.plist li.on .more { grid-template-rows: 1fr; opacity: 1; visibility: visible; transition: grid-template-rows .36s var(--ease), opacity .3s ease .05s, visibility 0s; }
+.plist li.on .more-in { padding-bottom: 14px; }
 .plist .more p { margin: 8px 0 0; }
 .plist .more a { font-weight: 600; }
+.plist li { transition: background-color .25s ease; }
 .plist li.on { background: #fff7dc; }
-.plist li.on .more { display: block; }
 .acts { display: flex; gap: 7px; flex-wrap: wrap; margin-top: 2px; }
 
 .betavids { margin-top: 12px; background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 10px 10px 8px; }
-.bvh { display: flex; align-items: center; gap: 6px; color: var(--ink); font-size: 15px; }
+.bvh { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 6px; color: var(--ink); font-size: 15px; }
+.bvh b { white-space: nowrap; }
 .bvh svg { width: 16px; height: 16px; color: #c4302b; }
 .bvh span { color: var(--ink-3); font-size: 13px; }
 .vrow { display: flex; gap: 10px; overflow-x: auto; padding: 8px 0 4px; scrollbar-width: thin; }
@@ -419,6 +431,84 @@ html.ios-gap .sheet[data-snap="full"] { transform: translateY(0); }
 html.ios-gap .sheet[data-snap="hidden"] { transform: translateY(calc(88vh - var(--mini))); }
 html.ios-gap .topbar, html.ios-gap .mapbtns, html.ios-gap .toast { position: absolute; }
 
+
+/* ================================================================== motion & polish
+   Everything animates transform / opacity (cheap on phones). Easing is a soft spring. */
+:root {
+  --ease: cubic-bezier(.22, 1, .36, 1);
+  --spring: cubic-bezier(.32, .72, 0, 1);
+  --shadow-1: 0 1px 2px rgba(45, 38, 32, .08), 0 4px 14px rgba(45, 38, 32, .10);
+  --shadow-2: 0 2px 6px rgba(45, 38, 32, .10), 0 12px 32px rgba(45, 38, 32, .16);
+}
+
+/* Sheet: iOS-like spring between peek / half / full / minimized. */
+.sheet {
+  transition: transform .46s var(--spring);
+  box-shadow: 0 -1px 0 rgba(255, 255, 255, .6) inset, 0 -8px 30px rgba(45, 38, 32, .16);
+}
+.handle span { transition: width .2s var(--ease), background-color .2s; }
+.handle:active span { width: 52px; background: #b3a590; }
+
+/* Panes slide: forward from the right, back from the left, quick fade when swapping. */
+@keyframes pane-fwd { from { opacity: 0; transform: translate3d(26px, 0, 0); } to { opacity: 1; transform: none; } }
+@keyframes pane-back { from { opacity: 0; transform: translate3d(-26px, 0, 0); } to { opacity: 1; transform: none; } }
+@keyframes pane-swap { from { opacity: 0; transform: translate3d(0, 6px, 0); } to { opacity: 1; transform: none; } }
+.enter-fwd { animation: pane-fwd .32s var(--ease) backwards; }
+.enter-back { animation: pane-back .32s var(--ease) backwards; }
+.enter-swap { animation: pane-swap .26s var(--ease) backwards; }
+
+/* Tabs: a white pill slides under the selected tab. */
+.tabs { position: relative; isolation: isolate; }
+.tabs::before {
+  content: ""; position: absolute; z-index: -1; top: 3px; bottom: 3px; left: 3px;
+  width: calc((100% - 14px) / 3); border-radius: 8px; background: #fff;
+  box-shadow: 0 1px 3px rgba(45, 38, 32, .14);
+  transform: translateX(calc(var(--tab-i, 0) * (100% + 4px)));
+  transition: transform .38s var(--spring);
+}
+.tabs button { position: relative; transition: color .2s ease; }
+.tabs button[aria-selected="true"] { background: transparent; box-shadow: none; }
+
+/* Press feedback: everything tappable gives a little. */
+.pill, .fab, .chip, .back, .acct, .x, .alabel button, .lpin button, .vid, .rm, .link {
+  transition: transform .14s var(--ease), background-color .2s ease, color .2s ease, border-color .2s ease, box-shadow .2s ease, opacity .2s ease;
+}
+.pill:active, .fab:active, .chip:active, .back:active, .acct:active, .x:active, .rm:active { transform: scale(.95); }
+.vid:active { transform: scale(.97); }
+.alabel button:active { transform: translate(-50%, calc(-50% + var(--dy, 0px))) scale(.95); }
+.list .item, .prob, .lbh, .lp { transition: background-color .18s ease; -webkit-tap-highlight-color: transparent; }
+.list .item:active, .lbh:active, .lp:active { background: var(--paper-2); }
+.prob:active { background: rgba(45, 38, 32, .04); }
+
+/* Floating chrome: softer layered shadows, crisper borders. */
+.brand, .fab, .locstatus { box-shadow: var(--shadow-1); border-color: rgba(45, 38, 32, .08); }
+.fab.on { box-shadow: 0 4px 14px rgba(29, 111, 209, .35); }
+.alabel button { box-shadow: var(--shadow-1); }
+.lpin button { box-shadow: 0 3px 10px rgba(0, 0, 0, .3); }
+
+/* Search: lifts and glows while you type. */
+.search { transition: background-color .2s ease, border-color .2s ease, box-shadow .2s ease; }
+.search:focus-within { background: #fff; border-color: var(--accent); box-shadow: 0 0 0 3px rgba(29, 111, 209, .14); }
+
+/* Little things pop in. */
+@keyframes pop-in { from { opacity: 0; transform: translate3d(0, -6px, 0) scale(.98); } to { opacity: 1; transform: none; } }
+@keyframes toast-in { from { opacity: 0; transform: translate(-50%, -10px) scale(.96); } to { opacity: 1; transform: translate(-50%, 0); } }
+@keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes card-up { from { transform: translate3d(0, 40px, 0); opacity: .4; } to { transform: none; opacity: 1; } }
+.inpick:not([hidden]), .acctmenu:not([hidden]) { animation: pop-in .26s var(--ease) backwards; }
+.acctmenu { box-shadow: var(--shadow-2); border-color: rgba(45, 38, 32, .08); transform-origin: top right; }
+.toast { animation: toast-in .3s var(--spring) backwards; }
+.toast.leaving { opacity: 0; transform: translate(-50%, -8px); transition: opacity .2s ease, transform .2s ease; }
+.modal:not([hidden]) { animation: fade-in .22s ease backwards; }
+.modal:not([hidden]) .card { animation: card-up .42s var(--spring) backwards; }
+
+/* Detail drawing and video cards. */
+.art { box-shadow: inset 0 1px 0 rgba(255, 255, 255, .7); }
+.vid img { transition: box-shadow .2s ease; box-shadow: 0 2px 8px rgba(45, 38, 32, .14); }
+.grade { box-shadow: inset 0 -1px 0 rgba(0, 0, 0, .12); }
+.chip[aria-pressed="true"] { box-shadow: 0 2px 8px color-mix(in srgb, var(--c) 35%, transparent); }
+.where .arrow { transition: transform .5s var(--spring); }
+
 /* ------------------------------------------------------------------ desktop */
 @media (min-width: 900px) {
   .sheet {
@@ -446,6 +536,6 @@ html.ios-gap .topbar, html.ios-gap .mapbtns, html.ios-gap .toast { position: abs
   .ogrid { grid-template-columns: 1fr; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .sheet { transition: none; }
+  *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
   .me-dot::after { animation: none; }
 }

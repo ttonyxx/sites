@@ -245,7 +245,7 @@
       $$("#detail [data-act=save]").forEach((b) => paintSave(b, +b.dataset.pid));
       $$("#detail [data-act=addlist]").forEach((b) => paintAddList(b, +b.dataset.pid));
     }
-    if (!$("#picker").hidden && pickerMode === "add") renderPicker();
+    $$("#detail .inpick:not([hidden])").forEach((el) => { if (!el.contains(document.activeElement)) renderInlinePicker(el); });
   }
   function paintAddList(btn, pid) {
     const n = [...lists.keys()].filter((id) => inList(id, pid)).length;
@@ -1005,18 +1005,19 @@
                 </span>
                 ${gradeHTML(p)}
               </button>
-              <div class="more">
+              <div class="more"><div class="more-in">
                 <div class="acts">
                   <button class="pill" data-act="save" data-pid="${p.id}"></button>
                   <button class="pill" data-act="addlist" data-pid="${p.id}"></button>
                   <button class="pill" data-act="dl" data-pid="${p.id}"></button>
                   ${navigator.share ? `<button class="pill" data-act="share" data-pid="${p.id}">${ICON.share}<span>Share</span></button>` : ""}
                 </div>
+                <div class="inpick" data-pid="${p.id}" hidden></div>
                 ${p.where ? `<p><b>Where:</b> ${esc(p.where)}</p>` : ""}
                 ${p.fa ? `<p><b>FA:</b> ${esc(p.fa)}</p>` : ""}
                 ${videoHTML(p)}
                 <p><a href="${esc(p.url)}" target="_blank" rel="noopener">Full beta, photos & comments on Mountain Project ↗</a></p>
-              </div>
+              </div></div>
             </li>`).join("")}
         </ol>
         <p class="approach"><a href="${esc(b.url)}" target="_blank" rel="noopener">${esc(b.name)} on Mountain Project ↗</a> · <a href="https://maps.apple.com/?daddr=${b.lat},${b.lon}&dirflg=w" target="_blank" rel="noopener">Walk here (Apple)</a> · <a href="https://www.google.com/maps/dir/?api=1&destination=${b.lat},${b.lon}&travelmode=walking" target="_blank" rel="noopener">Google</a></p>
@@ -1208,6 +1209,7 @@
     map.fitBounds(L.latLngBounds(groups.map((g) => [g.b.lat, g.b.lon])), { paddingTopLeft: padTL(), paddingBottomRight: padBR(), maxZoom: 18.5 });
   }
   function clearListMode() {
+    if (!$("#listpane").hidden) animatePane($("#listview"), "back");
     if (pinLayer) { pinLayer.remove(); pinLayer = null; }
     mapEl.classList.remove("listmode");
     state.listView = null;
@@ -1250,18 +1252,32 @@
     return groups;
   }
   function openList(view) {
+    const fromDetail = !$("#detail").hidden;
     state.listView = view;
     state.sel = null;
     state.selP = null;
     $("#detail").hidden = true;
     $("#listview").hidden = true;
     $("#listpane").hidden = false;
+    animatePane($("#listpane"), fromDetail ? "back" : "fwd");
     $("#listpane").scrollTop = 0;
     const groups = renderListPane();
     if (!isDesktop() && sheet.dataset.snap !== "full") setSnap("half");
     requestAnimationFrame(() => fitList(groups));
   }
-  function syncTabs() { $$(".tabs button").forEach((x) => x.setAttribute("aria-selected", x.dataset.tab === state.tab)); }
+  function syncTabs() {
+    $$(".tabs button").forEach((x, i) => {
+      const on = x.dataset.tab === state.tab;
+      x.setAttribute("aria-selected", on);
+      if (on) $(".tabs").style.setProperty("--tab-i", i);
+    });
+  }
+  // Slide a pane in: "fwd" from the right (opening), "back" from the left (returning), "swap" fade.
+  function animatePane(el, dir) {
+    el.classList.remove("enter-fwd", "enter-back", "enter-swap");
+    void el.offsetWidth; // restart the animation
+    el.classList.add(`enter-${dir}`);
+  }
   function listsBack() {
     state.tab = "lists";
     syncTabs();
@@ -1302,16 +1318,28 @@
     renderPicker();
     if (mode !== "add") setTimeout(() => $("#picker input[type=text]")?.focus(), 60);
   }
+  // Add to list: a small panel that opens right under the climb's buttons (tap again to close).
+  function renderInlinePicker(el) {
+    const pid = +el.dataset.pid;
+    const ids = [LIST_SAVED, ...[...lists.keys()].sort((a, b) => listName(a).localeCompare(listName(b)))];
+    el.innerHTML = `<ul class="pick">${ids.map((id) => `<li><label><input type="checkbox" data-list="${id}" ${inList(id, pid) ? "checked" : ""}><span>${id === LIST_SAVED ? ICON.saved : ICON.list}${esc(listName(id))}</span><span class="muted">${listPids(id).length}</span></label></li>`).join("")}</ul>
+      <form class="newl"><input type="text" maxlength="60" placeholder="New list, e.g. Projects" autocomplete="off" enterkeyhint="done"><button class="pill solid" type="submit">${ICON.plus}<span>Create</span></button></form>`;
+  }
+  function toggleInlinePicker(pid) {
+    const el = $(`#detail .inpick[data-pid="${pid}"]`);
+    if (!el) return;
+    const open = el.hidden;
+    $$("#detail .inpick").forEach((x) => { x.hidden = true; x.innerHTML = ""; });
+    $$("#detail [data-act=addlist]").forEach((b) => b.setAttribute("aria-expanded", "false"));
+    if (open) {
+      renderInlinePicker(el);
+      el.hidden = false;
+      $(`#detail [data-act=addlist][data-pid="${pid}"]`)?.setAttribute("aria-expanded", "true");
+    }
+  }
   function renderPicker() {
     const body = $("#picker .body");
-    if (pickerMode === "add") {
-      const p = P[pickerPid];
-      $("#picker h3").textContent = "Add to list";
-      const ids = [LIST_SAVED, ...[...lists.keys()].sort((a, b) => listName(a).localeCompare(listName(b)))];
-      body.innerHTML = `<p class="muted">${esc(p.name)} · ${esc(p.grade)} · ${esc(B[p.boulder].name)}</p>
-        <ul class="pick">${ids.map((id) => `<li><label><input type="checkbox" data-list="${id}" ${inList(id, pickerPid) ? "checked" : ""}><span>${id === LIST_SAVED ? ICON.saved : ICON.list}${esc(listName(id))}</span><span class="muted">${listPids(id).length}</span></label></li>`).join("")}</ul>
-        <form class="newl" data-act="create"><input type="text" maxlength="60" placeholder="New list, e.g. Buttermilks projects" autocomplete="off" enterkeyhint="done"><button class="pill solid" type="submit">${ICON.plus}<span>Create</span></button></form>`;
-    } else {
+    {
       const rename = pickerMode === "rename";
       $("#picker h3").textContent = rename ? "Rename list" : "New list";
       body.innerHTML = `<form class="newl" data-act="${rename ? "rename" : "create"}"><input type="text" maxlength="60" value="${esc(rename ? listName(state.listView?.id) : "")}" placeholder="List name, e.g. Tick list" autocomplete="off" enterkeyhint="done"><button class="pill solid" type="submit">${rename ? "Rename" : `${ICON.plus}<span>Create</span>`}</button></form>`;
@@ -1339,12 +1367,15 @@
   }
   function openBoulder(bid, pid) {
     const changed = state.sel !== bid;
+    const wasOpen = !$("#detail").hidden;
     state.sel = bid;
     state.selP = pid;
     $("#listview").hidden = true;
     $("#listpane").hidden = true;
     $("#detail").hidden = false;
     renderDetail();
+    if (!wasOpen) animatePane($("#detail"), "fwd");
+    else if (changed) animatePane($("#detail"), "swap");
     if (changed) $("#detail").scrollTop = 0;
     if (pid) setTimeout(() => selectProblem(pid, true), 30);
     highlight();
@@ -1353,10 +1384,12 @@
     focus([b.lat, b.lon]);
   }
   function closeDetail() {
+    const wasOpen = !$("#detail").hidden || !$("#listpane").hidden;
     state.sel = null;
     state.selP = null;
     $("#detail").hidden = true;
     $("#listview").hidden = false;
+    if (wasOpen) animatePane($("#listview"), "back");
     highlight();
   }
   function back() {
@@ -1430,9 +1463,13 @@
   function toast(msg, ms = 3500) {
     const t = $("#toast");
     t.textContent = msg;
+    t.classList.remove("leaving");
     t.hidden = false;
     clearTimeout(toastT);
-    toastT = setTimeout(() => (t.hidden = true), ms);
+    toastT = setTimeout(() => {
+      t.classList.add("leaving");
+      toastT = setTimeout(() => { t.hidden = true; t.classList.remove("leaving"); }, 200);
+    }, ms);
   }
   function onNet() {
     const off = !navigator.onLine;
@@ -1479,10 +1516,12 @@
     }, { passive: true });
     $("#q").addEventListener("focus", () => { if (!isDesktop()) setSnap("full"); });
     $$(".tabs button").forEach((btn) => btn.addEventListener("click", () => {
+      if (state.tab === btn.dataset.tab) return;
       state.tab = btn.dataset.tab;
-      $$(".tabs button").forEach((x) => x.setAttribute("aria-selected", x === btn));
+      syncTabs();
       renderList();
       $("#list").scrollTop = 0;
+      animatePane($("#list"), "swap");
     }));
     $("#grade-chips").addEventListener("click", (e) => {
       const c = e.target.closest(".chip");
@@ -1515,7 +1554,7 @@
       const a = act?.dataset.act;
       if (a === "back") return back();
       if (a === "locate") return startLocate(true);
-      if (a === "addlist") return openPicker("add", +act.dataset.pid);
+      if (a === "addlist") return toggleInlinePicker(+act.dataset.pid);
       if (a === "save") {
         const pid = +act.dataset.pid;
         setSaved(pid, !saved.has(pid));
@@ -1579,6 +1618,22 @@
       }
       const it = e.target.closest("[data-go]");
       if (it) go(it.dataset.go);
+    });
+    $("#detail").addEventListener("change", (e) => {
+      const cb = e.target.closest(".inpick input[data-list]");
+      if (cb) setInList(cb.dataset.list, +cb.closest(".inpick").dataset.pid, cb.checked);
+    });
+    $("#detail").addEventListener("submit", (e) => {
+      const panel = e.target.closest(".inpick");
+      if (!panel) return;
+      e.preventDefault();
+      const input = panel.querySelector("input[type=text]");
+      const name = input.value.trim();
+      if (!name) return;
+      input.blur();
+      createList(name, [+panel.dataset.pid]);
+      renderInlinePicker(panel);
+      toast(`Added to “${name}”.`);
     });
     $("#picker").addEventListener("click", (e) => {
       if (e.target.id === "picker" || e.target.closest("[data-act=close]")) $("#picker").hidden = true;
@@ -1656,6 +1711,7 @@
     renderChips();
     renderAreaSelect();
     bind();
+    syncTabs();
     initSheet();
     initMap();
     window.__atlas = { map, state, REG };

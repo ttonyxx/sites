@@ -6,7 +6,7 @@
 // App files and data are served from the cache right away and refreshed in the background
 // (stale-while-revalidate). When a refresh brings a new version, open pages are told so they can
 // switch to it.
-const SHELL = "atlas-shell-v13";
+const SHELL = "atlas-shell-v15";
 const FILES = [
   "./", "index.html", "style.css", "app.js", "auth.js", "firebase-config.js", "manifest.webmanifest", "icon.svg",
   "icons/apple-touch-icon.png", "icons/icon-192.png", "icons/icon-512.png",
