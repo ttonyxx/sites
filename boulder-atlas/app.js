@@ -160,6 +160,7 @@
     persistLists();
     emitList(id);
     refreshSavedUI();
+    refreshMarks();
     return id;
   }
   function setInList(id, pid, on) {
@@ -172,6 +173,7 @@
     persistLists();
     emitList(id);
     refreshSavedUI();
+    refreshMarks(pid);
   }
   function renameList(id, name) {
     const l = lists.get(id);
@@ -187,12 +189,37 @@
     persistLists();
     emitList(id);
     refreshSavedUI();
+    refreshMarks();
+  }
+  // Marks shown next to a climb's name: in Saved (gold), in your lists (blue), downloaded (green).
+  const listsWith = (pid) => [...lists.keys()].filter((id) => lists.get(id).items?.[pid]);
+  function marksHTML(pid) {
+    const ls = listsWith(pid);
+    let h = "";
+    if (saved.has(pid)) h += `<span class="mark saved" title="In Saved">${ICON.saved}</span>`;
+    if (ls.length) h += `<span class="mark inlist" title="In ${esc(ls.map(listName).join(", "))}">${ICON.list}${ls.length > 1 ? `<b>${ls.length}</b>` : ""}</span>`;
+    if (downloaded.has(pid)) h += `<span class="mark dl" title="Downloaded">${ICON.done}</span>`;
+    return h;
+  }
+  const keptClass = (pid) => (saved.has(pid) ? "kept-saved" : listsWith(pid).length ? "kept-list" : "");
+  // Update marks already on screen (rows and the open boulder) without re-rendering the list.
+  function refreshMarks(pid) {
+    $$(pid == null ? "[data-marks]" : `[data-marks="${pid}"]`).forEach((el) => {
+      const id = +el.dataset.marks;
+      el.innerHTML = marksHTML(id);
+      const li = el.closest("li");
+      if (li) {
+        li.classList.toggle("kept-saved", keptClass(id) === "kept-saved");
+        li.classList.toggle("kept-list", keptClass(id) === "kept-list");
+      }
+    });
   }
   function replaceLists(map) {
     lists.clear();
     for (const [k, v] of Object.entries(map || {})) if (v && v.name) lists.set(k, { name: v.name, items: v.items || {}, updated: v.updated || 0 });
     persistLists();
     refreshSavedUI();
+    refreshMarks();
   }
 
   function setSaved(pid, on, { silent = false } = {}) {
@@ -201,12 +228,14 @@
     store.set("saved", Object.fromEntries(saved));
     if (!silent) bus.dispatchEvent(new CustomEvent("saved", { detail: { pid, on } }));
     refreshSavedUI();
+    refreshMarks(pid);
   }
   function replaceSaved(map) {
     saved.clear();
     for (const [k, v] of Object.entries(map || {})) if (P[+k]) saved.set(+k, v);
     store.set("saved", Object.fromEntries(saved));
     refreshSavedUI();
+    refreshMarks();
   }
   function refreshSavedUI() {
     $("#n-lists").textContent = lists.size + 1;
@@ -806,7 +835,7 @@
     const b = B[p.boulder];
     const nv = p.videos?.length || 0;
     const where = state.area === "all" ? `${esc(b.name)} · ${esc(A[b.area]?.name ?? "")}` : esc(b.name);
-    return `<li><button class="item" data-go="p/${p.id}">${gradeHTML(p)}<span class="main"><span class="name">${esc(p.name)}${safetyHTML(p)}${saved.has(p.id) ? `<span class="mark" title="Saved">${ICON.saved}</span>` : ""}${downloaded.has(p.id) ? `<span class="mark dl" title="Downloaded">${ICON.done}</span>` : ""}</span><span class="meta">${starsHTML(p.stars)}${votesHTML(p.votes)}${p.height_ft ? ` · ${p.height_ft} ft` : ""}${nv ? ` · <span class="vids">${ICON.play}${nv}</span>` : ""} · ${where}</span></span>${distCell(ploc(p))}</button></li>`;
+    return `<li class="${keptClass(p.id)}"><button class="item" data-go="p/${p.id}">${gradeHTML(p)}<span class="main"><span class="name">${esc(p.name)}${safetyHTML(p)}<span class="marks" data-marks="${p.id}">${marksHTML(p.id)}</span></span><span class="meta">${starsHTML(p.stars)}${votesHTML(p.votes)}${p.height_ft ? ` · ${p.height_ft} ft` : ""}${nv ? ` · <span class="vids">${ICON.play}${nv}</span>` : ""} · ${where}</span></span>${distCell(ploc(p))}</button></li>`;
   }
   function renderList() {
     if (!REG) return;
@@ -967,11 +996,11 @@
         ${b.approach ? `<p class="approach"><b>Getting there:</b> ${esc(b.approach)}</p>` : ""}
         <ol class="plist">
           ${ps.map((p, i) => `
-            <li data-pid="${p.id}" class="${p.id === state.selP ? "on" : ""}">
+            <li data-pid="${p.id}" class="${p.id === state.selP ? "on" : ""} ${keptClass(p.id)}">
               <button class="prob" data-p="${p.id}">
                 <span class="num" style="--c:${colorOf(p.g)}">${i + 1}</span>
                 <span class="main">
-                  <span class="name">${esc(p.name)}</span>${safetyHTML(p)}${saved.has(p.id) ? `<span class="mark">${ICON.saved}</span>` : ""}
+                  <span class="name">${esc(p.name)}</span>${safetyHTML(p)}<span class="marks" data-marks="${p.id}">${marksHTML(p.id)}</span>
                   <span class="meta">${starsHTML(p.stars)}${votesHTML(p.votes)}${p.height_ft ? ` · ${p.height_ft} ft` : ""}${p.font ? ` · Font ${esc(p.font)}` : ""}${p.videos?.length ? ` · <span class="vids">${ICON.play}${p.videos.length}</span>` : ""}</span>
                 </span>
                 ${gradeHTML(p)}
@@ -1068,12 +1097,14 @@
       downloaded.add(id);
     }
     store.set("downloaded", [...downloaded]);
+    refreshMarks();
     persistStorage();
     if (fails && !navigator.onLine) toast("Saved the climb info. Video thumbnails will download next time you have signal.");
   }
   async function removeDownload(id) {
     downloaded.delete(id);
     store.set("downloaded", [...downloaded]);
+    refreshMarks(id);
     try {
       const c = await caches.open("atlas-dl");
       await Promise.all((P[id].videos || []).filter((v) => v.y).map((v) => c.delete(`https://i.ytimg.com/vi/${v.y}/mqdefault.jpg`)));
@@ -1336,8 +1367,8 @@
   // ------------------------------------------------------------------ bottom sheet
   const sheet = $("#sheet");
   const SNAPS = ["peek", "half", "full"];
-  // "hidden" slides the sheet fully off the screen (drag it down past the peek, or tap the hide
-  // button); the floating List button brings it back.
+  // "hidden" = minimized: drag the sheet down past the peek and only its handle stays on screen;
+  // drag the handle back up (or tap it) to bring the list back.
   function setSnap(s) {
     sheet.dataset.snap = s;
     document.body.classList.toggle("sheet-hidden", s === "hidden");
@@ -1346,6 +1377,15 @@
   function initSheet() {
     const handle = $("#handle");
     let startY = 0, startT = 0, dragging = false, moved = false, lastY = 0, lastT = 0, vel = 0;
+    // How much of the minimized sheet stays visible: the handle plus the home-indicator area.
+    const miniPx = () => {
+      const probe = document.createElement("div");
+      probe.style.cssText = "position:fixed;bottom:0;height:env(safe-area-inset-bottom);visibility:hidden";
+      document.body.appendChild(probe);
+      const sb = probe.offsetHeight;
+      probe.remove();
+      return 26 + sb;
+    };
     const curT = () => new DOMMatrix(getComputedStyle(sheet).transform).m42;
     handle.addEventListener("pointerdown", (e) => {
       if (isDesktop()) return;
@@ -1361,7 +1401,7 @@
       const now = performance.now();
       vel = (e.clientY - lastY) / Math.max(1, now - lastT);
       lastY = e.clientY; lastT = now;
-      sheet.style.transform = `translateY(${clamp(startT + dy, 0, sheet.offsetHeight)}px)`;
+      sheet.style.transform = `translateY(${clamp(startT + dy, 0, sheet.offsetHeight - miniPx())}px)`;
     });
     const end = () => {
       if (!dragging) return;
@@ -1369,10 +1409,10 @@
       sheet.classList.remove("dragging");
       const t = curT();
       sheet.style.transform = "";
-      if (!moved) { setSnap(SNAPS[(SNAPS.indexOf(sheet.dataset.snap) + 1) % 3]); return; }
+      if (!moved) { setSnap(sheet.dataset.snap === "hidden" ? "peek" : SNAPS[(SNAPS.indexOf(sheet.dataset.snap) + 1) % 3]); return; }
       const h = sheet.offsetHeight;
       const peekPx = parseFloat(getComputedStyle(sheet).getPropertyValue("--peek")) || 178;
-      const pos = { hidden: h, peek: h - peekPx, half: h - innerHeight * 0.52, full: 0 };
+      const pos = { hidden: h - miniPx(), peek: h - peekPx, half: h - innerHeight * 0.52, full: 0 };
       let best = "half", bd = Infinity;
       const proj = t + vel * 180;
       for (const [k, v] of Object.entries(pos)) if (Math.abs(proj - v) < bd) { bd = Math.abs(proj - v); best = k; }
@@ -1381,10 +1421,8 @@
     handle.addEventListener("pointerup", end);
     handle.addEventListener("pointercancel", end);
     handle.addEventListener("keydown", (e) => {
-      if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setSnap(SNAPS[(SNAPS.indexOf(sheet.dataset.snap) + 1) % 3]); }
+      if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setSnap(sheet.dataset.snap === "hidden" ? "peek" : SNAPS[(SNAPS.indexOf(sheet.dataset.snap) + 1) % 3]); }
     });
-    $("#sheet-hide").addEventListener("click", () => setSnap("hidden"));
-    $("#btn-sheet").addEventListener("click", () => setSnap("peek"));
   }
 
   // ------------------------------------------------------------------ toast + online state
