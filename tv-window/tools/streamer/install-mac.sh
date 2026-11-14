@@ -78,7 +78,13 @@ cat > "$PLIST" <<PLIST
 </dict></plist>
 PLIST
 launchctl bootout "$DOMAIN/$LABEL" 2>/dev/null || true
-launchctl bootstrap "$DOMAIN" "$PLIST"
+# bootout returns before the old service is fully gone; bootstrapping too soon fails with error 5.
+for _ in $(seq 1 20); do launchctl print "$DOMAIN/$LABEL" >/dev/null 2>&1 || break; sleep 0.5; done
+for i in 1 2 3 4 5; do
+  launchctl bootstrap "$DOMAIN" "$PLIST" 2>/dev/null && break
+  [ "$i" = 5 ] && fail "Couldn't start the background service (launchctl bootstrap failed)."
+  sleep 1
+done
 
 # ---- check -------------------------------------------------------------------------------------------
 for _ in $(seq 1 20); do
