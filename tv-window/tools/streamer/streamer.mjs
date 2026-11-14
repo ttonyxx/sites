@@ -36,8 +36,20 @@ const FFMPEG = process.env.FFMPEG_PATH || firstExisting("/opt/homebrew/bin/ffmpe
 // TVs find the streamer on the LAN by sending an SSDP M-SEARCH for this service type.
 const SSDP_ST = "urn:tonyxin-com:service:dibs-tv-streamer:1";
 const FPS = Number(process.env.FPS || 30);
+// Encoders left behind by an earlier run (crash, reinstall) write into an old dibs-live-* folder; stop them.
+try {
+  const orphans = (await new Promise((resolve) => {
+    let out = "";
+    const ps = spawn("/bin/ps", ["-Ao", "pid=,args="]);
+    ps.stdout.on("data", (b) => (out += b));
+    ps.on("close", () => resolve(out));
+    ps.on("error", () => resolve(""));
+  })).split("\n").filter((l) => /ffmpeg/.test(l) && /dibs-live-/.test(l)).map((l) => Number(l.trim().split(/\s+/)[0]));
+  for (const pid of orphans) { try { process.kill(pid, "SIGKILL"); } catch {} }
+  if (orphans.length) console.log(`stopped ${orphans.length} leftover encoder(s)`);
+} catch {}
 const LIVE = fs.mkdtempSync(path.join(os.tmpdir(), "dibs-live-"));
-const VERSION = "2026-11-14.4";
+const VERSION = "2026-11-14.5";
 // Stream size. The page still renders at 1920x1080 (the TV layout Dibs expects); the capture is scaled down.
 // 720p is plenty for Dibs's big type and halves the work per frame on a busy Mac. OUT=1080 for full HD.
 const OUT_H = Number(process.env.OUT || 720);
@@ -279,7 +291,7 @@ http
         fs.writeFileSync(me, src);
         log("updated from GitHub; restarting");
         json(200, { ok: true, updated: true });
-        setTimeout(() => process.exit(0), 300);
+        setTimeout(async () => { await browser?.close().catch(() => {}); process.exit(0); }, 300);
         return;
       }
       if (url.pathname === "/frame.jpg" && session?.frame) { res.writeHead(200, { "Content-Type": "image/jpeg" }); return res.end(session.frame); }
@@ -328,4 +340,10 @@ if (process.env.NO_SSDP !== "1") {
   });
 }
 
-for (const sig of ["SIGINT", "SIGTERM"]) process.on(sig, async () => { await stop(); await browser?.close(); process.exit(0); });
+for (const sig of ["SIGINT", "SIGTERM"]) process.on(sig, async () => {
+  const enc = session?.ffmpeg;
+  await stop();
+  try { enc?.kill("SIGKILL"); } catch {}
+  await browser?.close();
+  process.exit(0);
+});
