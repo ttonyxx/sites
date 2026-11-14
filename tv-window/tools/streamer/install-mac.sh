@@ -30,7 +30,10 @@ fi
 # ---- prerequisites: Node, ffmpeg, Chrome ----------------------------------------------------------
 find_bin() { for p in "$@"; do [ -x "$p" ] && { echo "$p"; return; }; done; }
 BREW="$(find_bin /opt/homebrew/bin/brew /usr/local/bin/brew)"
-NODE="$(command -v node || find_bin /opt/homebrew/bin/node /usr/local/bin/node || true)"
+# puppeteer-core needs Node 22.12+; the first node on PATH (e.g. an nvm default) may be older.
+node_ok() { "$1" -e 'const [a,b]=process.versions.node.split(".").map(Number);process.exit(a>22||(a===22&&b>=12)?0:1)' 2>/dev/null; }
+find_node() { for p in /opt/homebrew/bin/node /usr/local/bin/node "$(command -v node 2>/dev/null)"; do [ -x "$p" ] && node_ok "$p" && { echo "$p"; return; }; done; }
+NODE="$(find_node || true)"
 FFMPEG="$(command -v ffmpeg || find_bin /opt/homebrew/bin/ffmpeg /usr/local/bin/ffmpeg || true)"
 CHROME="$(find_bin "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" "/Applications/Chromium.app/Contents/MacOS/Chromium" || true)"
 
@@ -39,9 +42,10 @@ need=()
 [ -z "$FFMPEG" ] && need+=(ffmpeg)
 if [ ${#need[@]} -gt 0 ] || [ -z "$CHROME" ]; then
   [ -n "$BREW" ] || fail "Missing Node, ffmpeg or Google Chrome. Install Homebrew (https://brew.sh) and run this again."
-  [ ${#need[@]} -gt 0 ] && { bold "Installing ${need[*]} with Homebrew…"; "$BREW" install "${need[@]}"; }
+  [ ${#need[@]} -gt 0 ] && { bold "Installing ${need[*]} with Homebrew…"; "$BREW" install "${need[@]}" || "$BREW" upgrade "${need[@]}"; }
   [ -z "$CHROME" ] && { bold "Installing Google Chrome with Homebrew…"; "$BREW" install --cask google-chrome; }
-  NODE="$(command -v node || find_bin /opt/homebrew/bin/node /usr/local/bin/node)"
+  NODE="$(find_node)"
+  [ -n "$NODE" ] || fail "Couldn't find Node 22.12 or newer. Run: brew upgrade node"
   FFMPEG="$(command -v ffmpeg || find_bin /opt/homebrew/bin/ffmpeg /usr/local/bin/ffmpeg)"
 fi
 NPM="$(dirname "$NODE")/npm"
