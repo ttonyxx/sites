@@ -68,5 +68,35 @@ export async function renderDibs({ browser, IMG, FONTS, TOOLS }) {
   const buf = await (await page.$("#card")).screenshot({ omitBackground: true });
   fs.writeFileSync(path.join(IMG, "dibs_card.png"), buf);
   console.log(`  dibs_card.png          1280x720  ${(buf.length / 1024).toFixed(0)} KB`);
+
+  // Game picker art for hosting on the TV through the streamer: a header and one tile per game.
+  const head = html.split("<body>")[0];
+  const shot = async (name, w, h, body) => {
+    await page.setViewport({ width: w, height: h, deviceScaleFactor: 1 });
+    await page.setContent(`${head}<body><div id="x" style="width:${w}px;height:${h}px">${body}</div></body></html>`);
+    await page.evaluate(() => document.fonts.ready);
+    const b = await (await page.$("#x")).screenshot({ omitBackground: true });
+    fs.writeFileSync(path.join(IMG, name), b);
+    console.log(`  ${name.padEnd(22)} ${w}x${h}  ${(b.length / 1024).toFixed(0)} KB`);
+  };
+  await shot("dibs_header.png", 1400, 150, `<div style="display:flex;align-items:center;gap:26px;height:150px">
+    ${MASCOT.replace('width="112" height="112"', 'width="104" height="104"')}<span class="badge" style="font-size:46px">DIBS</span>
+    <div style="margin-left:14px"><div style="font:800 58px/1 Brico;color:#fff;letter-spacing:-.02em">Host a game on this TV</div>
+    <div style="font:28px Body;color:rgba(255,255,255,.75);margin-top:10px">Pick one, then everyone joins on their phones.</div></div></div>`);
+  const games = [
+    ["punchline", "Punchline", "Funny answers, head to head votes", "3 to 16 players", YELLOW, INK],
+    ["imposter", "Imposter", "Give clues, catch the faker", "3 to 15 players", "#9B6BFF", "#fff"],
+    ["tee-party", "Tee Party", "Draw, write, and battle T-shirts", "3 to 8 players", "#FF7AC6", INK],
+    ["brawl", "Blob Brawl", "Wobbly 3D beasts, last one standing", "2 to 8 players", BLUE, INK],
+    ["piggyback", "Piggyback", "Stack up and get the team through the door", "2 to 8 players", "#2DD4A0", INK],
+    ["pirates", "Pirates", "Grab and steal words from the pool", "1 to 8 players", "#FFFFFF", INK],
+  ];
+  for (const [id, name, blurb, players, bg, fg] of games) {
+    await shot(`dibs_g_${id}.png`, 440, 250, `<div style="box-sizing:border-box;width:440px;height:250px;border-radius:30px;background:${bg};
+      border:5px solid ${INK};box-shadow:inset 0 -10px 0 rgba(0,0,0,.12);padding:28px 30px;color:${fg};display:flex;flex-direction:column">
+      <div style="font:800 50px/1 Brico;letter-spacing:-.02em">${name}</div>
+      <div style="font:26px/1.25 Body;margin-top:14px;opacity:.88">${blurb}</div>
+      <div style="margin-top:auto;font:700 22px Brico;opacity:.7">${players}</div></div>`);
+  }
   await page.close();
 }

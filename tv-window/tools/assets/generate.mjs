@@ -186,6 +186,7 @@ ninePatch("card.9.png", 28, 1, 0, 0); // solid, tinted + faded at runtime
 ninePatch("card_edge.9.png", 28, 0, 1, 1.6); // hairline outline
 ninePatch("focus.9.png", 18, 0.16, 0.7, 2.5); // list focus highlight
 ninePatch("pill.9.png", 22, 1, 0, 0);
+ninePatch("ring.9.png", 36, 0, 1, 7); // thick focus ring (Dibs game picker)
 
 // --- Fonts -----------------------------------------------------------------------------
 // Nunito: rounded terminals read as friendly at couch distance.

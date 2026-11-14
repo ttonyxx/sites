@@ -16,7 +16,14 @@ sub fetch()
     xfer.RetainBodyOnError(true)
 
     result = { ok: false, code: 0, body: "", data: invalid }
-    if xfer.AsyncGetToString()
+    started = false
+    if m.top.method = "POST"
+        xfer.SetRequest("POST")
+        started = xfer.AsyncPostFromString("")
+    else
+        started = xfer.AsyncGetToString()
+    end if
+    if started
         msg = Wait(20000, port)
         if Type(msg) = "roUrlEvent"
             result.code = msg.GetResponseCode()
