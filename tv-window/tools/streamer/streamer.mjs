@@ -21,10 +21,7 @@ import os from "node:os";
 import path from "node:path";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { createRequire } from "node:module";
-
-const require = createRequire(import.meta.url);
-const puppeteer = require("puppeteer-core");
+import puppeteer from "puppeteer-core";
 
 const PORT = Number(process.env.PORT || 8790);
 const DIBS = (process.env.DIBS_URL || "https://dibsgames.com").replace(/\/$/, "");
