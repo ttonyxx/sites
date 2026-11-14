@@ -49,7 +49,7 @@ try {
   if (orphans.length) console.log(`stopped ${orphans.length} leftover encoder(s)`);
 } catch {}
 const LIVE = fs.mkdtempSync(path.join(os.tmpdir(), "dibs-live-"));
-const VERSION = "2026-11-14.5";
+const VERSION = "2026-11-14.6";
 // Stream size. The page still renders at 1920x1080 (the TV layout Dibs expects); the capture is scaled down.
 // 720p is plenty for Dibs's big type and halves the work per frame on a busy Mac. OUT=1080 for full HD.
 const OUT_H = Number(process.env.OUT || 720);
@@ -183,12 +183,14 @@ async function start(gameId) {
     "-f", "lavfi", "-i", "anullsrc=r=48000:cl=stereo",
     "-map", "0:v", "-map", "1:a",
     "-c:v", "libx264", "-preset", "veryfast", "-tune", "zerolatency", "-profile:v", "main", "-pix_fmt", "yuv420p",
-    "-r", String(FPS), "-g", String(FPS), "-keyint_min", String(FPS), "-sc_threshold", "0",
+    "-r", String(FPS), "-g", String(FPS * 2), "-keyint_min", String(FPS * 2), "-sc_threshold", "0",
     "-vf", `scale=${OUT_W}:${OUT_H}:flags=bicubic`,
     "-b:v", OUT_H > 720 ? "5M" : "3M", "-maxrate", OUT_H > 720 ? "6M" : "3.6M", "-bufsize", "2M",
     "-c:a", "aac", "-b:a", "64k",
-    "-f", "hls", "-hls_time", "1", "-hls_list_size", "8", "-hls_delete_threshold", "8",
-    "-hls_flags", "delete_segments+independent_segments+omit_endlist",
+    // 2 s segments and a 20 s window: Roku's live player rebuffers (black) with 1 s segments over Wi-Fi.
+    // temp_file makes playlist/segment writes atomic so the TV never reads a half-written playlist.
+    "-f", "hls", "-hls_time", "2", "-hls_list_size", "10", "-hls_delete_threshold", "10",
+    "-hls_flags", "delete_segments+independent_segments+omit_endlist+temp_file",
     path.join(LIVE, "index.m3u8"),
   ], { stdio: ["pipe", "inherit", "inherit"] });
   ffmpeg.on("exit", (c) => log("ffmpeg exited", c));
