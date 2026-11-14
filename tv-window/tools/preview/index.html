@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Window · Roku preview</title>
+  <style>
+    :root { color-scheme: dark; }
+    html, body { margin: 0; height: 100%; background: #05070d; color: #cfd6e4; font: 14px/1.4 system-ui, sans-serif; }
+    body { display: grid; grid-template-rows: 1fr auto; }
+    #stage { display: grid; place-items: center; overflow: hidden; }
+    #display { width: min(100vw, calc((100vh - 64px) * 16 / 9)); aspect-ratio: 16 / 9; background: #000; }
+    #remote { display: flex; gap: 8px; justify-content: center; padding: 12px; flex-wrap: wrap; }
+    button { background: #1a2234; color: #fff; border: 1px solid #2c3954; border-radius: 8px; padding: 8px 14px; font: inherit; cursor: pointer; }
+    button:hover { background: #24304a; }
+    #log { position: fixed; left: 8px; bottom: 64px; max-width: 50vw; max-height: 30vh; overflow: auto; font: 11px ui-monospace, monospace; color: #8fa0bf; white-space: pre-wrap; pointer-events: none; }
+  </style>
+</head>
+<body>
+  <div id="stage"><canvas id="display" width="1920" height="1080"></canvas></div>
+  <video id="player" muted playsinline style="display:none"></video>
+  <div id="remote">
+    <button data-key="left">◀ −1h</button>
+    <button data-key="select">OK</button>
+    <button data-key="right">+1h ▶</button>
+    <button data-key="up">▲</button>
+    <button data-key="down">▼</button>
+    <button data-key="info">✱ Settings</button>
+    <button data-key="back">↩ Back</button>
+    <button id="reload">Reload app</button>
+  </div>
+  <div id="log"></div>
+  <script src="./brs.api.js"></script>
+  <script>
+    // Query params: ?seed=lat,lon,Name  pre-sets the location (simulator registry lives in localStorage).
+    //               ?clear=1            wipes the simulated registry first.
+    //               ?mock=rain          fake forecast scenario (see mock.mjs)
+    const DEV_ID = "34c6fceca75e456f25e7e99531e2425c6c1de443";
+    const params = new URLSearchParams(location.search);
+    if (params.get("clear")) Object.keys(localStorage).filter((k) => k.startsWith(DEV_ID)).forEach((k) => localStorage.removeItem(k));
+    if (params.get("seed")) {
+      const [lat, lon, ...name] = params.get("seed").split(",");
+      localStorage.setItem(`${DEV_ID}.window.loc`, JSON.stringify({ name: name.join(",") || "Preview City", region: "", lat: +lat, lon: +lon }));
+    }
+    if (params.get("mock")) localStorage.setItem(`${DEV_ID}.window.api`, `${location.origin}/mock/${params.get("mock")}`);
+    else localStorage.removeItem(`${DEV_ID}.window.api`);
+    for (const k of ["units", "clock", "layout"]) if (params.get(k)) localStorage.setItem(`${DEV_ID}.window.${k}`, params.get(k));
+
+    const logEl = document.getElementById("log");
+    window.__log = [];
+    const log = (type, msg) => {
+      const line = `[${type}] ${typeof msg === "string" ? msg : JSON.stringify(msg)}`;
+      window.__log.push(line);
+      if (type === "error" || type === "warning" || type === "print") logEl.textContent = window.__log.slice(-14).join("\n");
+    };
+
+    async function run() {
+      const resp = await fetch("./app.zip?t=" + Date.now());
+      const blob = await resp.arrayBuffer();
+      brs.execute("window.zip", blob, { clearDisplayOnExit: false, entryPoint: params.get("saver") ? false : true });
+    }
+
+    (async () => {
+      brs.subscribe("preview", (event, data) => {
+        if (["print", "warning", "error", "debug", "started", "closed", "loaded"].includes(event)) log(event, data);
+        if (event === "started") window.__started = true;
+        if (event === "closed") window.__closed = data;
+      });
+      const assets = await (await fetch("./assets/common.zip")).arrayBuffer();
+      await brs.initialize(
+        {
+          assets,
+          extensions: new Map([[brs.SupportedExtension.SceneGraph, "./brs-sg.js"]]),
+          displayMode: "1080p",
+          locale: "en_US",
+          clockFormat: "12h",
+        },
+        { debugToConsole: true, showStats: false },
+      );
+      await run();
+    })();
+
+    document.querySelectorAll("[data-key]").forEach((b) =>
+      b.addEventListener("click", () => brs.sendKeyPress(b.dataset.key)),
+    );
+    document.getElementById("reload").addEventListener("click", () => { brs.terminate(); setTimeout(run, 300); });
+    window.pressKey = (key) => new Promise((res) => { brs.sendKeyPress(key); setTimeout(res, 250); });
+  </script>
+</body>
+</html>

@@ -1,0 +1,9 @@
+{
+  "rootDir": "../channel",
+  "files": ["manifest", "source/**/*", "components/**/*", "images/**/*", "fonts/**/*"],
+  "stagingDir": "dist/staging",
+  "retainStagingDir": false,
+  "createPackage": false,
+  "diagnosticFilters": [],
+  "emitDefinitions": false
+}
