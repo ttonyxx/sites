@@ -90,7 +90,7 @@ sub showMain()
         { key: "loc", title: "Location", value: place, desc: "Used for the forecast and for where the sun sits in the sky. Search by city or town name." }
         { key: "units", title: "Temperature", value: units, desc: "Fahrenheit or Celsius." }
         { key: "clock", title: "Clock", value: clock, desc: "12-hour or 24-hour time." }
-        { key: "layout", title: "Layout", value: layout, desc: "Minimal hides the forecast cards so the background gets the whole screen. You can also press OK on the dashboard to switch." }
+        { key: "layout", title: "Layout", value: layout, desc: "Minimal hides the forecast cards so the background gets the whole screen. You can also press Play/Pause on the dashboard to switch." }
         { key: "saver", title: "Screensaver", value: "How to", desc: "To show Window whenever the TV sits idle: Home " + Chr(8250) + " Settings " + Chr(8250) + " Theme " + Chr(8250) + " Screensavers " + Chr(8250) + " Window." }
     ]
     if hasAlbum

@@ -136,7 +136,7 @@ sub buildLayout()
         m.photos.dim = 0.04
         m.status.font = m.f.pStatus
         m.status.color = White(0.42)
-        m.top.findNode("hints").translation = [m.PANEL_W + 64, 990]
+        m.top.findNode("hints").translation = [m.PANEL_W + 36, 990]
     else
         buildFull()
         m.scrim.visible = true
@@ -267,15 +267,15 @@ sub buildHints()
     pill.opacity = 0.72
     m.hintItems = []
     x = 24
-    for each item in [["key_star", 60, "Settings"], ["key_ok", 72, "Minimal"], ["key_lr", 76, "Time travel"], ["key_down", 60, "Apps"]]
+    for each item in [["key_lr", 76, "Apps"], ["key_ok", 72, "Open"], ["key_star", 60, "Settings"], ["key_rwff", 84, "Time travel"]]
         AddPoster(g, "pkg:/images/" + item[0] + ".png", x, 13, item[1] * 0.8, 48 * 0.8)
         l = AddLabel(g, m.f.hint, White(0.8), x + item[1] * 0.8 + 14, 15)
         l.text = item[2]
         m.hintItems.Push(l)
-        x = x + item[1] * 0.8 + 14 + TextWidth(l) + 40
+        x = x + item[1] * 0.8 + 14 + TextWidth(l) + 30
     end for
     pill.width = x - 16
-    m.hintLayout = m.hintItems[1]
+    m.hintLayout = invalid
 end sub
 
 sub buildToast()
@@ -551,7 +551,9 @@ sub applyLayout(animate as Boolean)
     Fade(m.top.findNode("cards"), target, d)
     Fade(m.details, target, d)
     Fade(m.sun, target, d)
-    if full then m.hintLayout.text = "Minimal" else m.hintLayout.text = "Full view"
+    if m.hintLayout <> invalid
+        if full then m.hintLayout.text = "Minimal" else m.hintLayout.text = "Full view"
+    end if
 end sub
 
 sub Fade(node as Object, target as Float, duration as Float)
@@ -849,12 +851,15 @@ function onKeyEvent(key as String, press as Boolean) as Boolean
     if m.top.screensaver then return false
     if m.dockFocus >= 0
         restartDockIdle()
-        if key = "left" or key = "rev"
+        if key = "left"
             if m.dockFocus > 0 then m.dockFocus = m.dockFocus - 1
             renderDockFocus()
-        else if key = "right" or key = "fwd"
+        else if key = "right"
             if m.dockFocus < m.apps.Count() - 1 then m.dockFocus = m.dockFocus + 1
             renderDockFocus()
+        else if key = "fwd" or key = "rev"
+            leaveDock()
+            if key = "fwd" then shiftTime(1) else shiftTime(-1)
         else if key = "OK"
             i = m.dockFocus
             leaveDock()
@@ -870,23 +875,24 @@ function onKeyEvent(key as String, press as Boolean) as Boolean
     if key = "options"
         openSettings()
         return true
-    else if key = "OK"
+    else if key = "play"
         if m.prefs.layout = "minimal" then m.prefs.layout = "full" else m.prefs.layout = "minimal"
         SavePref("layout", m.prefs.layout)
         applyLayout(true)
         showHints()
         return true
-    else if key = "down"
+    else if key = "OK" or key = "left" or key = "right" or key = "down"
         if m.apps.Count() > 0
             m.dockFocus = 0
             renderDockFocus()
             restartDockIdle()
         end if
+        showHints()
         return true
-    else if key = "right" or key = "fwd"
+    else if key = "fwd"
         shiftTime(1)
         return true
-    else if key = "left" or key = "rev"
+    else if key = "rev"
         shiftTime(-1)
         return true
     else if key = "back" or key = "replay"

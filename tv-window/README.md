@@ -15,11 +15,11 @@ the TV into an ambient dashboard:
   [Open-Meteo](https://open-meteo.com) (free, no API key).
 - **Settings:** press ✱ on the remote to set the city (on-screen search), the background
   (Photos / Photos + sky / Sky), °F/°C, 12/24-hour clock and Full/Minimal layout.
-- **Time travel:** press ◀ / ▶ to scrub the sky and forecast through the day. The ↺ Replay key
-  returns to now, and so does a minute without input. The TV keeps the Back key for itself, so
+- **Time travel:** press ⏪ / ⏩ to scrub the sky and forecast through the day. The ↺ Replay key
+  returns to now, and so does a minute without input. ⏯ toggles the minimal layout. The TV keeps the Back key for itself, so
   apps never see it.
-- **App dock:** always on screen, Dibs and Spotify to start with. ▼ moves into the dock, ◀ ▶ pick, OK
-  opens, ▲ leaves. Roku won't let a channel launch other apps, so Roku apps (like Spotify) are opened
+- **App dock:** always on screen, Dibs and Spotify to start with. ◀ ▶ (or ▼ / OK) select an app, OK
+  opens it, ▲ leaves. Roku won't let a channel launch other apps, so Roku apps (like Spotify) are opened
   through the home streamer, which sends the TV an ECP `launch`. Add more with `apps` in `local.json`.
 - **Host Dibs:** the Dibs tile hosts a [Dibs](https://dibsgames.com) party game on the TV. Pick a game,
   and the TV shows the room (QR code, players, the whole game) while everyone plays on their phones.
