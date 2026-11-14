@@ -5,7 +5,7 @@
 #   curl -fsSL https://raw.githubusercontent.com/ttonyxx/sites/main/tv-window/tools/streamer/install-mac.sh | bash
 #
 # Re-run it any time to update. Remove it with:  ... | bash -s -- --uninstall
-set -euo pipefail
+set -eo pipefail  # (no -u: macOS bash 3.2 treats empty arrays as unset)
 
 RAW="https://raw.githubusercontent.com/ttonyxx/sites/main/tv-window/tools/streamer"
 DIR="$HOME/Library/Application Support/DibsTVStreamer"
