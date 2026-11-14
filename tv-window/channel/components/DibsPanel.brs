@@ -8,8 +8,10 @@ sub init()
         { id: "pirates", name: "Pirates" }
     ]
     m.mode = "card"
-    m.focus = 0
+    m.focus = 0 ' -1 = the "Back to <game>" button
+    m.liveInfo = invalid ' { id, name, code } while the streamer is hosting a room
     m.task = invalid
+    m.pollTask = invalid
     m.video = m.top.findNode("video")
     m.video.observeField("state", "onVideoState")
 
@@ -24,23 +26,21 @@ sub init()
     hint.color = White(0.55)
     hint.text = "Press OK to close"
 
-    ' Game picker: 3 x 2 tiles.
+    ' Game picker: 3 x 2 tiles under an optional "Back to <game>" button.
     tiles = m.top.findNode("tiles")
     m.tilePos = []
     for i = 0 to m.GAMES.Count() - 1
         x = 260 + (i mod 3) * 480
-        y = 290 + (i \ 3) * 290
+        y = 330 + (i \ 3) * 284
         AddPoster(tiles, "pkg:/images/dibs_g_" + m.GAMES[i].id + ".png", x, y, 440, 250)
         m.tilePos.Push([x - 16, y - 16])
     end for
-    ph = m.top.findNode("pickHint")
-    ph.font = MakeFont("SemiBold", 28)
-    ph.color = White(0.9)
-    ph.text = "OK  host it on this TV      " + Chr(183) + "      Replay key  close"
-    pn = m.top.findNode("pickNote")
-    pn.font = MakeFont("Regular", 24)
-    pn.color = White(0.5)
-    pn.text = "The TV shows the room; everyone plays on their phones. It runs a few seconds behind the phones."
+    m.top.findNode("resumeText").font = MakeFont("SemiBold", 30)
+    m.top.findNode("resumeText").color = White(1)
+    m.top.findNode("pickNote").font = MakeFont("Regular", 24)
+    m.top.findNode("pickNote").color = White(0.5)
+    m.top.findNode("pickHint").font = MakeFont("SemiBold", 28)
+    m.top.findNode("pickHint").color = White(0.9)
 
     st = m.top.findNode("statusText")
     st.font = MakeFont("SemiBold", 32)
@@ -49,13 +49,68 @@ sub init()
     m.autoClose = m.top.findNode("autoClose")
     m.autoClose.observeField("fire", "closePanel")
     m.top.findNode("statusTimer").observeField("fire", "hideStatus")
+    m.top.findNode("poll").observeField("fire", "pollStatus")
 end sub
+
+' ---- streamer status (also keeps a parked room alive) -------------------------------------------
+
+sub onStreamer()
+    t = m.top.findNode("poll")
+    t.control = "stop"
+    if m.top.streamer <> ""
+        pollStatus()
+        t.control = "start"
+    end if
+end sub
+
+sub pollStatus()
+    if m.top.streamer = "" or m.pollTask <> invalid then return
+    m.pollTask = CreateObject("roSGNode", "FetchTask")
+    m.pollTask.url = m.top.streamer + "/status"
+    m.pollTask.observeField("result", "onStatus")
+    m.pollTask.control = "RUN"
+end sub
+
+sub onStatus()
+    r = m.pollTask.result
+    m.pollTask = invalid
+    info = invalid
+    if r.ok
+        if r.data.running = true and r.data.game <> invalid
+            info = { id: r.data.game, name: GameName(r.data.game), code: "" }
+            if r.data.code <> invalid then info.code = r.data.code
+        end if
+    end if
+    setLive(info)
+end sub
+
+sub setLive(info as Dynamic)
+    m.liveInfo = info
+    if info = invalid
+        m.top.live = ""
+        if m.focus < 0 then m.focus = 0
+    else
+        m.top.live = info.name
+    end if
+    if m.mode = "pick" then renderPick()
+end sub
+
+function GameName(id as String) as String
+    for each g in m.GAMES
+        if g.id = id then return g.name
+    end for
+    return "Dibs"
+end function
+
+' ---- modes ---------------------------------------------------------------------------------------
 
 sub onOpen()
     if not m.top.open then return
     m.top.visible = true
     if m.top.streamer <> ""
+        if m.liveInfo <> invalid then m.focus = -1
         setMode("pick")
+        pollStatus()
     else
         setMode("card")
     end if
@@ -69,12 +124,50 @@ sub setMode(mode as String)
     m.top.findNode("cardMode").visible = mode = "card"
     m.top.findNode("pickMode").visible = mode = "pick" or mode = "starting"
     m.top.findNode("dim").visible = mode <> "playing"
-    if mode = "pick" then moveRing(false)
+    if mode = "pick" then renderPick()
+end sub
+
+sub renderPick()
+    live = m.liveInfo <> invalid
+    g = m.top.findNode("resume")
+    g.visible = live
+    if live
+        lbl = m.top.findNode("resumeText")
+        lbl.width = 0
+        text = "Back to " + m.liveInfo.name
+        if m.liveInfo.code <> "" then text = text + "   " + Chr(183) + "   room " + m.liveInfo.code
+        lbl.text = text
+        w = TextWidth(lbl) + 90
+        lbl.width = w
+        m.top.findNode("resumeBg").width = w
+        g.translation = [(1920 - w) / 2, 242]
+        m.resumeW = w
+    end if
+    if m.focus < 0 and not live then m.focus = 0
+    hint = m.top.findNode("pickHint")
+    note = m.top.findNode("pickNote")
+    if m.focus < 0
+        hint.text = "OK  back to the game      " + Chr(183) + "      *  end the room      " + Chr(183) + "      Replay key  close"
+        note.text = "The room keeps running while you're away, so phones stay in the game."
+    else
+        hint.text = "OK  host it on this TV      " + Chr(183) + "      Replay key  close"
+        note.text = "The TV shows the room; everyone plays on their phones. It runs a few seconds behind the phones."
+        if live then note.text = "Hosting a new game ends the " + m.liveInfo.name + " room."
+    end if
+    moveRing(false)
 end sub
 
 sub moveRing(animate as Boolean)
-    target = m.tilePos[m.focus]
     ring = m.top.findNode("ring")
+    if m.focus < 0
+        target = [(1920 - m.resumeW) / 2 - 14, 228]
+        ring.width = m.resumeW + 28
+        ring.height = 92
+    else
+        target = m.tilePos[m.focus]
+        ring.width = 472
+        ring.height = 282
+    end if
     if not animate
         ring.translation = target
         return
@@ -87,12 +180,15 @@ end sub
 
 sub closePanel()
     if not m.top.visible then return
-    if m.mode = "playing" or m.mode = "starting" then stopGame(false)
+    if m.mode = "starting" then stopRoom()
+    if m.mode = "playing" then parkGame(false)
     m.autoClose.control = "stop"
     m.top.open = false
     m.top.visible = false
     m.top.closed = true
 end sub
+
+' ---- hosting through the streamer ------------------------------------------------------------
 
 ' Deep link: host this game straight away (game id as on the streamer, e.g. "punchline").
 sub onAutostart()
@@ -100,14 +196,17 @@ sub onAutostart()
     for i = 0 to m.GAMES.Count() - 1
         if m.GAMES[i].id = m.top.autostart then m.focus = i
     end for
-    if m.mode = "playing" or m.mode = "starting" then stopGame(false)
     startGame()
 end sub
 
-' ---- hosting through the streamer ------------------------------------------------------------
-
 sub startGame()
     game = m.GAMES[m.focus]
+    if m.liveInfo <> invalid
+        if m.liveInfo.id = game.id
+            resumeGame()
+            return
+        end if
+    end if
     m.autoClose.control = "stop"
     setMode("starting")
     showStatus("Setting up " + game.name + Chr(8230), 0)
@@ -133,15 +232,26 @@ sub onStarted()
         m.autoClose.control = "start"
         return
     end if
+    setLive({ id: r.data.game, name: GameName(r.data.game), code: r.data.code })
+    play(r.data.hls)
+    showStatus("Room " + r.data.code + "   " + Chr(183) + "   Replay key goes back to Window (the game keeps going)", 8)
+end sub
+
+sub resumeGame()
+    m.autoClose.control = "stop"
+    play("/live/index.m3u8")
+    showStatus("Back to " + m.liveInfo.name, 3)
+end sub
+
+sub play(hlsPath as String)
     c = CreateObject("roSGNode", "ContentNode")
-    c.url = m.top.streamer + r.data.hls
+    c.url = m.top.streamer + hlsPath
     c.streamFormat = "hls"
     c.live = true
     m.video.content = c
     m.video.visible = true
     m.video.control = "play"
     setMode("playing")
-    showStatus("Room " + r.data.code + "   " + Chr(183) + "   Replay key ends it", 8)
     m.top.setFocus(true)
 end sub
 
@@ -149,12 +259,30 @@ sub onVideoState()
     s = m.video.state
     print "[window] dibs video "; s
     if s = "error" and m.mode = "playing"
-        stopGame(true)
+        m.video.visible = false
+        setMode("pick")
+        pollStatus()
         showStatus("The stream stopped. Pick a game to start again.", 6)
+        m.autoClose.control = "start"
     end if
 end sub
 
-sub stopGame(backToPicker as Boolean)
+' Leave the stream but keep the room running; the dock's Dibs tile and "Back to" button return to it.
+sub parkGame(closeAfter as Boolean)
+    m.video.control = "stop"
+    m.video.visible = false
+    hideStatus()
+    m.mode = "pick"
+    if closeAfter
+        m.mode = "card"
+        m.top.open = false
+        m.top.visible = false
+        m.top.parked = true
+        m.top.closed = true
+    end if
+end sub
+
+sub stopRoom()
     m.video.control = "stop"
     m.video.visible = false
     t = CreateObject("roSGNode", "FetchTask")
@@ -162,10 +290,7 @@ sub stopGame(backToPicker as Boolean)
     t.url = m.top.streamer + "/stop"
     t.control = "RUN"
     m.stopTask = t
-    if backToPicker
-        setMode("pick")
-        m.autoClose.control = "start"
-    end if
+    setLive(invalid)
 end sub
 
 sub showStatus(text as String, seconds as Float)
@@ -188,35 +313,56 @@ sub hideStatus()
     m.top.findNode("status").visible = false
 end sub
 
-' The TV may keep Back for itself, so Replay and * also close / end things.
+' The TV may keep Back for itself, so Replay and * also work.
 function onKeyEvent(key as String, press as Boolean) as Boolean
     if not press then return true
-    leave = (key = "back") or (key = "replay") or (key = "options")
+    leave = (key = "back") or (key = "replay")
     if m.mode = "card"
-        if leave or key = "OK" or key = "up" or key = "down" then closePanel()
+        if leave or key = "OK" or key = "up" or key = "down" or key = "options" then closePanel()
     else if m.mode = "pick"
         m.autoClose.control = "stop"
         m.autoClose.control = "start"
         n = m.GAMES.Count()
-        if key = "right" and m.focus mod 3 < 2 then m.focus = m.focus + 1
-        if key = "left" and m.focus mod 3 > 0 then m.focus = m.focus - 1
-        if key = "down" and m.focus + 3 < n then m.focus = m.focus + 3
-        if key = "up" and m.focus >= 3 then m.focus = m.focus - 3
-        if key = "left" or key = "right" or key = "up" or key = "down" then moveRing(true)
-        if key = "OK" then startGame()
+        moved = false
+        if m.focus < 0
+            if key = "down"
+                m.focus = 0 : moved = true
+            else if key = "OK"
+                resumeGame()
+            else if key = "options"
+                stopRoom()
+                showStatus("Room ended", 3)
+            end if
+        else
+            if key = "right" and m.focus mod 3 < 2
+                m.focus = m.focus + 1 : moved = true
+            else if key = "left" and m.focus mod 3 > 0
+                m.focus = m.focus - 1 : moved = true
+            else if key = "down" and m.focus + 3 < n
+                m.focus = m.focus + 3 : moved = true
+            else if key = "up" and m.focus >= 3
+                m.focus = m.focus - 3 : moved = true
+            else if key = "up" and m.liveInfo <> invalid
+                m.focus = -1 : moved = true
+            else if key = "OK"
+                startGame()
+            else if key = "options"
+                closePanel()
+            end if
+        end if
+        if moved then renderPick()
         if leave then closePanel()
     else if m.mode = "starting"
         if leave
-            m.mode = "pick"
-            stopGame(true)
+            stopRoom()
+            setMode("pick")
             hideStatus()
         end if
     else if m.mode = "playing"
-        if leave
-            stopGame(true)
-            hideStatus()
+        if leave or key = "options"
+            parkGame(true)
         else
-            showStatus("Replay key ends the game", 3)
+            showStatus("Replay key goes back to Window (the game keeps going)", 3)
         end if
     end if
     return true

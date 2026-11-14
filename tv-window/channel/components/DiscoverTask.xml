@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Finds a Dibs TV streamer on the LAN with an SSDP M-SEARCH. result = "http://ip:port" or "". -->
+<component name="DiscoverTask" extends="Task">
+  <interface>
+    <field id="result" type="string" alwaysNotify="true" />
+  </interface>
+  <script type="text/brightscript" uri="DiscoverTask.brs" />
+</component>
