@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- One HTTPS GET on a background thread. Set url (and q to fill a {q} placeholder), then control = "RUN". -->
+<component name="FetchTask" extends="Task">
+  <interface>
+    <field id="url" type="string" />
+    <field id="q" type="string" />
+    <field id="result" type="assocarray" />
+  </interface>
+  <script type="text/brightscript" uri="FetchTask.brs" />
+</component>

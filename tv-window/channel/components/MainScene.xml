@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8"?>
+<component name="MainScene" extends="Scene">
+  <interface>
+    <field id="screensaver" type="boolean" value="false" onChange="onScreensaverSet" />
+  </interface>
+  <script type="text/brightscript" uri="MainScene.brs" />
+  <script type="text/brightscript" uri="lib/util.brs" />
+  <script type="text/brightscript" uri="lib/sky.brs" />
+  <script type="text/brightscript" uri="lib/weather.brs" />
+  <script type="text/brightscript" uri="lib/prefs.brs" />
+  <children>
+    <Sky id="sky" />
+    <Group id="content">
+      <Group id="clock" />
+      <Group id="now" />
+      <Group id="cards" />
+      <Label id="status" />
+    </Group>
+    <Group id="hints" opacity="0" />
+    <Group id="toast" opacity="0" />
+    <SettingsPanel id="settings" visible="false" />
+
+    <Timer id="tick" repeat="true" duration="1" />
+    <Timer id="refresh" repeat="true" duration="900" />
+    <Timer id="retry" repeat="false" duration="120" />
+    <Timer id="hintTimer" repeat="false" duration="8" />
+    <Timer id="toastTimer" repeat="false" duration="2.5" />
+    <Timer id="driftTimer" repeat="true" duration="90" />
+
+    <Animation id="drift" duration="30" easeFunction="inOutQuad">
+      <Vector2DFieldInterpolator id="driftInterp" key="[0,1]" fieldToInterp="content.translation" />
+    </Animation>
+  </children>
+</component>

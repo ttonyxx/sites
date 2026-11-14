@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Full-screen animated sky. Set `state` (see SkyState in lib/sky.brs) plus `duration` seconds to tween. -->
+<component name="Sky" extends="Group">
+  <interface>
+    <field id="state" type="assocarray" onChange="onState" />
+    <field id="duration" type="float" value="2" />
+  </interface>
+  <script type="text/brightscript" uri="Sky.brs" />
+  <children>
+    <Rectangle id="base" width="1920" height="1080" color="0x070B1AFF" />
+    <Poster id="top" uri="pkg:/images/sky_grad.png" width="1920" height="1080" blendColor="0x070B1AFF" />
+
+    <Group id="stars">
+      <Poster id="starsA" uri="pkg:/images/stars_a.png" width="1920" height="1080" />
+      <Poster id="starsB" uri="pkg:/images/stars_b.png" width="1920" height="1080" opacity="0.5" />
+    </Group>
+
+    <Poster id="moonGlow" uri="pkg:/images/glow.png" width="900" height="900" translation="[1050,-240]" blendColor="0x9FB0E8FF" opacity="0" />
+    <Poster id="sunGlow" uri="pkg:/images/glow.png" width="1500" height="1500" translation="[-560,320]" blendColor="0xFFD09AFF" opacity="0" />
+
+    <Group id="clouds" opacity="0">
+      <Group id="farTrack">
+        <Poster id="farA" uri="pkg:/images/clouds_far.png" width="1920" height="600" />
+        <Poster id="farB" uri="pkg:/images/clouds_far.png" width="1920" height="600" translation="[1920,0]" />
+      </Group>
+      <Group id="nearTrack" translation="[0,60]">
+        <Poster id="nearA" uri="pkg:/images/clouds_near.png" width="1920" height="760" />
+        <Poster id="nearB" uri="pkg:/images/clouds_near.png" width="1920" height="760" translation="[1920,0]" />
+      </Group>
+    </Group>
+
+    <Poster id="scrim" uri="pkg:/images/scrim.png" width="1920" height="1080" />
+
+    <Animation id="tween" duration="2" easeFunction="inOutCubic">
+      <ColorFieldInterpolator id="iBase" key="[0,1]" fieldToInterp="base.color" />
+      <ColorFieldInterpolator id="iTop" key="[0,1]" fieldToInterp="top.blendColor" />
+      <ColorFieldInterpolator id="iGlow" key="[0,1]" fieldToInterp="sunGlow.blendColor" />
+      <FloatFieldInterpolator id="iGlowA" key="[0,1]" fieldToInterp="sunGlow.opacity" />
+      <Vector2DFieldInterpolator id="iGlowPos" key="[0,1]" fieldToInterp="sunGlow.translation" />
+      <FloatFieldInterpolator id="iMoon" key="[0,1]" fieldToInterp="moonGlow.opacity" />
+      <FloatFieldInterpolator id="iStars" key="[0,1]" fieldToInterp="stars.opacity" />
+      <FloatFieldInterpolator id="iClouds" key="[0,1]" fieldToInterp="clouds.opacity" />
+      <ColorFieldInterpolator id="iTintFarA" key="[0,1]" fieldToInterp="farA.blendColor" />
+      <ColorFieldInterpolator id="iTintFarB" key="[0,1]" fieldToInterp="farB.blendColor" />
+      <ColorFieldInterpolator id="iTintNearA" key="[0,1]" fieldToInterp="nearA.blendColor" />
+      <ColorFieldInterpolator id="iTintNearB" key="[0,1]" fieldToInterp="nearB.blendColor" />
+    </Animation>
+
+    <Animation id="driftFar" duration="600" repeat="true" easeFunction="linear">
+      <Vector2DFieldInterpolator key="[0,1]" keyValue="[[0,0],[-1920,0]]" fieldToInterp="farTrack.translation" />
+    </Animation>
+    <Animation id="driftNear" duration="360" repeat="true" easeFunction="linear">
+      <Vector2DFieldInterpolator key="[0,1]" keyValue="[[0,60],[-1920,60]]" fieldToInterp="nearTrack.translation" />
+    </Animation>
+    <Animation id="twinkle" duration="7" repeat="true" easeFunction="inOutQuad">
+      <FloatFieldInterpolator key="[0,0.5,1]" keyValue="[0.2,1.0,0.2]" fieldToInterp="starsB.opacity" />
+    </Animation>
+  </children>
+</component>

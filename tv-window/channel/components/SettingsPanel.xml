@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Slide-in settings panel. Set prefs, then open = true. Emits changed = "<pref key>" and closed = true. -->
+<component name="SettingsPanel" extends="Group">
+  <interface>
+    <field id="prefs" type="assocarray" />
+    <field id="open" type="boolean" onChange="onOpen" />
+    <field id="changed" type="string" alwaysNotify="true" />
+    <field id="closed" type="boolean" alwaysNotify="true" />
+  </interface>
+  <script type="text/brightscript" uri="SettingsPanel.brs" />
+  <script type="text/brightscript" uri="lib/util.brs" />
+  <script type="text/brightscript" uri="lib/weather.brs" />
+  <script type="text/brightscript" uri="lib/prefs.brs" />
+  <children>
+    <Rectangle id="dim" width="1920" height="1080" color="0x000000FF" opacity="0.35" />
+    <Group id="panel">
+      <Poster id="bg" uri="pkg:/images/card.9.png" translation="[1120,-40]" width="880" height="1160" blendColor="0x0B1020FF" opacity="1" />
+      <Poster uri="pkg:/images/card_edge.9.png" translation="[1120,-40]" width="880" height="1160" opacity="0.14" />
+      <Group id="body" />
+    </Group>
+    <Animation id="slide" duration="0.28" easeFunction="outCubic">
+      <Vector2DFieldInterpolator key="[0,1]" keyValue="[[80,0],[0,0]]" fieldToInterp="panel.translation" />
+      <FloatFieldInterpolator key="[0,1]" keyValue="[0,1]" fieldToInterp="panel.opacity" />
+      <FloatFieldInterpolator key="[0,1]" keyValue="[0,0.35]" fieldToInterp="dim.opacity" />
+    </Animation>
+  </children>
+</component>

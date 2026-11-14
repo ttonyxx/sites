@@ -1,0 +1,22 @@
+{
+  "name": "tv-window-tools",
+  "private": true,
+  "description": "Build, lint, preview and sideload tooling for the Window Roku channel (not a website).",
+  "type": "module",
+  "scripts": {
+    "assets": "node assets/generate.mjs",
+    "lint": "bsc --project bsconfig.json",
+    "package": "node package.mjs",
+    "preview": "node preview/serve.mjs",
+    "deploy": "node deploy.mjs",
+    "dev": "node deploy.mjs --watch"
+  },
+  "devDependencies": {
+    "@expo-google-fonts/inter": "^0.4.2",
+    "brighterscript": "^0.73.8",
+    "brs-engine": "^2.6.2",
+    "brs-scenegraph": "^0.6.2",
+    "puppeteer-core": "^25.17.0",
+    "roku-deploy": "^3.18.4"
+  }
+}

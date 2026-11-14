@@ -14,6 +14,9 @@ https://tonyxin.com/sites/<folder>/
 | [`pirates`](pirates) | [tonyxin.com/sites/pirates](https://tonyxin.com/sites/pirates/) | **Pirates Blitz**: an arcade trainer for the anagram-stealing word game Pirates |
 | [`sleep-when-done`](sleep-when-done) | [tonyxin.com/sites/sleep-when-done](https://tonyxin.com/sites/sleep-when-done/) | Close your MacBook while Claude Code works: sessions finish, then it sleeps. The page hosts the script and agent install instructions. |
 
+Not every folder is a website. [`tv-window`](tv-window) is a custom Roku channel (a live-sky clock and weather
+dashboard) for the living-room TV. It has no `index.html` or top-level `package.json`, so the site build skips it.
+
 ## How publishing works
 
 `tonyxin.com` is served by GitHub Pages from the `TtonyxX.github.io` user site.
