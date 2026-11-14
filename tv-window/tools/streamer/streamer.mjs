@@ -37,7 +37,11 @@ const FFMPEG = process.env.FFMPEG_PATH || firstExisting("/opt/homebrew/bin/ffmpe
 const SSDP_ST = "urn:tonyxin-com:service:dibs-tv-streamer:1";
 const FPS = Number(process.env.FPS || 30);
 const LIVE = fs.mkdtempSync(path.join(os.tmpdir(), "dibs-live-"));
-const VERSION = "2026-11-14.3";
+const VERSION = "2026-11-14.4";
+// Stream size. The page still renders at 1920x1080 (the TV layout Dibs expects); the capture is scaled down.
+// 720p is plenty for Dibs's big type and halves the work per frame on a busy Mac. OUT=1080 for full HD.
+const OUT_H = Number(process.env.OUT || 720);
+const OUT_W = Math.round((OUT_H * 16) / 9);
 const RAW = "https://raw.githubusercontent.com/ttonyxx/sites/main/tv-window/tools/streamer";
 
 // Game ids on the Roku side -> the name on the /tv hub's game cards.
@@ -168,7 +172,8 @@ async function start(gameId) {
     "-map", "0:v", "-map", "1:a",
     "-c:v", "libx264", "-preset", "veryfast", "-tune", "zerolatency", "-profile:v", "main", "-pix_fmt", "yuv420p",
     "-r", String(FPS), "-g", String(FPS), "-keyint_min", String(FPS), "-sc_threshold", "0",
-    "-b:v", "5M", "-maxrate", "6M", "-bufsize", "3M",
+    "-vf", `scale=${OUT_W}:${OUT_H}:flags=bicubic`,
+    "-b:v", OUT_H > 720 ? "5M" : "3M", "-maxrate", OUT_H > 720 ? "6M" : "3.6M", "-bufsize", "2M",
     "-c:a", "aac", "-b:a", "64k",
     "-f", "hls", "-hls_time", "1", "-hls_list_size", "8", "-hls_delete_threshold", "8",
     "-hls_flags", "delete_segments+independent_segments+omit_endlist",
@@ -187,7 +192,7 @@ async function start(gameId) {
     if (!s.streamStart) s.streamStart = Date.now();
     try { await cdp.send("Page.screencastFrameAck", { sessionId: f.sessionId }); } catch {}
   });
-  await cdp.send("Page.startScreencast", { format: "jpeg", quality: 78, maxWidth: 1920, maxHeight: 1080, everyNthFrame: 1 });
+  await cdp.send("Page.startScreencast", { format: "jpeg", quality: 80, maxWidth: OUT_W, maxHeight: OUT_H, everyNthFrame: 1 });
   // The screencast only sends frames when something changes and slows down when the machine is busy;
   // feed ffmpeg exactly FPS frames per wall-clock second, repeating the latest one as needed.
   s.timer = setInterval(() => {
@@ -245,6 +250,7 @@ http
           d.wallSeconds = s.streamStart ? +((now - s.streamStart) / 1000).toFixed(1) : 0;
           d.behindSeconds = +(d.wallSeconds - d.streamSeconds).toFixed(1);
           d.encoderBacklogMB = +(s.ffmpeg.stdin.writableLength / 1048576).toFixed(1);
+          d.resolution = `${OUT_W}x${OUT_H}`;
           d.segments = fs.readdirSync(LIVE).filter((f) => f.endsWith(".ts")).length;
           d.webgl = await s.page.evaluate(() => {
             const gl = document.createElement("canvas").getContext("webgl2");
@@ -252,6 +258,15 @@ http
             return gl ? (ext ? gl.getParameter(ext.UNMASKED_RENDERER_WEBGL) : "webgl2") : "none";
           }).catch(() => null);
         }
+        // What else is keeping this machine busy (a busy machine means a choppier stream).
+        d.topProcesses = await new Promise((resolve) => {
+          const ps = spawn("/bin/ps", ["-Aceo", "pcpu=,comm="]);
+          let out = "";
+          ps.stdout.on("data", (b) => (out += b));
+          ps.on("close", () => resolve(out.trim().split("\n").map((l) => l.trim().split(/\s+(.+)/)).map(([c, n]) => ({ cpu: +c, name: n }))
+            .sort((a, b) => b.cpu - a.cpu).slice(0, 6)));
+          ps.on("error", () => resolve([]));
+        });
         return json(200, d);
       }
       if (url.pathname === "/log") { res.writeHead(200, { "Content-Type": "text/plain" }); return res.end(LOG.join("\n") + "\n"); }
