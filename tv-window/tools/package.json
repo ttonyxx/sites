@@ -15,10 +15,12 @@
   "devDependencies": {
     "@expo-google-fonts/inter": "^0.4.2",
     "@expo-google-fonts/nunito": "^0.4.2",
+    "@fontsource/bricolage-grotesque": "^5.3.0",
     "brighterscript": "^0.73.8",
     "brs-engine": "^2.6.2",
     "brs-scenegraph": "^0.6.2",
     "puppeteer-core": "^25.17.0",
+    "qrcode": "^1.5.4",
     "roku-deploy": "^3.18.4"
   }
 }

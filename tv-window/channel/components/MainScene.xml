@@ -23,6 +23,7 @@
     <Group id="hints" opacity="0" />
     <Group id="toast" opacity="0" />
     <SettingsPanel id="settings" visible="false" />
+    <DibsPanel id="dibs" visible="false" />
 
     <Timer id="tick" repeat="true" duration="1" />
     <Timer id="refresh" repeat="true" duration="900" />

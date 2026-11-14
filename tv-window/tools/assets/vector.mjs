@@ -57,6 +57,7 @@ const KEYS = {
   key_ok: `<span>OK</span>`,
   key_back: `<svg width="24" height="22" viewBox="0 0 24 22"><path d="M9 3L3 9L9 15M3.5 9H15A6 6 0 0 1 15 21H11" fill="none" stroke="#fff" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
   key_lr: `<svg width="34" height="22" viewBox="0 0 34 22"><path d="M10 4L3 11L10 18M24 4L31 11L24 18" fill="none" stroke="#fff" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
+  key_down: `<svg width="22" height="16" viewBox="0 0 22 16"><path d="M4 4L11 11L18 4" fill="none" stroke="#fff" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
   key_updown: `<svg width="22" height="26" viewBox="0 0 22 26"><path d="M5 9L11 3L17 9M5 17L11 23L17 17" fill="none" stroke="#fff" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
 };
 
@@ -136,6 +137,8 @@ export async function renderVector({ IMG, FONTS }) {
       await page.evaluate(() => document.fonts.ready);
       await save(name, await page.screenshot({ type, quality: type === "jpeg" ? 90 : undefined }));
     }
+    const { renderDibs } = await import("./dibs.mjs");
+    await renderDibs({ browser, IMG, FONTS, TOOLS: path.resolve(IMG, "../../tools") });
   } finally {
     await browser.close();
   }

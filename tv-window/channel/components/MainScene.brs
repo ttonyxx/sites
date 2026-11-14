@@ -70,6 +70,8 @@ sub init()
     m.settings = m.top.findNode("settings")
     m.settings.observeField("changed", "onSettingChanged")
     m.settings.observeField("closed", "onSettingsClosed")
+    m.dibs = m.top.findNode("dibs")
+    m.dibs.observeField("closed", "onSettingsClosed")
 
     observeTimer("tick", "onTick", true)
     observeTimer("refresh", "fetchWeather", true)
@@ -250,7 +252,7 @@ sub buildHints()
     pill.opacity = 0.72
     m.hintItems = []
     x = 24
-    for each item in [["key_star", 60, "Settings"], ["key_ok", 72, "Minimal"], ["key_lr", 76, "Time travel"]]
+    for each item in [["key_star", 60, "Settings"], ["key_ok", 72, "Minimal"], ["key_lr", 76, "Time travel"], ["key_down", 60, "Play Dibs"]]
         AddPoster(g, "pkg:/images/" + item[0] + ".png", x, 13, item[1] * 0.8, 48 * 0.8)
         l = AddLabel(g, m.f.hint, White(0.8), x + item[1] * 0.8 + 14, 15)
         l.text = item[2]
@@ -595,7 +597,6 @@ end sub
 ' ---- time travel (left / right on the remote) ----------------------------------------------
 
 sub shiftTime(hours as Integer)
-    print "[window] shiftTime "; hours
     if hours = 0 then m.timeShift = 0 else m.timeShift = m.timeShift + hours * 3600
     now = ClockNow()
     m.lastMinute = now \ 60
@@ -672,7 +673,6 @@ sub onSettingChanged()
 end sub
 
 function onKeyEvent(key as String, press as Boolean) as Boolean
-    print "[window] key "; key; " press="; press; " shift="; m.timeShift
     if not press then return false
     if m.top.screensaver then return false
     if key = "options"
@@ -683,6 +683,10 @@ function onKeyEvent(key as String, press as Boolean) as Boolean
         SavePref("layout", m.prefs.layout)
         applyLayout(true)
         showHints()
+        return true
+    else if key = "down"
+        m.dibs.open = true
+        Fade(m.top.findNode("hints"), 0.0, 0.2)
         return true
     else if key = "right" or key = "fwd"
         shiftTime(1)
