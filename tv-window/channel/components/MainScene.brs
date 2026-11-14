@@ -64,6 +64,7 @@ sub init()
     fetchWeather()
     showHints()
     m.top.setFocus(true)
+    m.top.signalBeacon("AppLaunchComplete") ' tells Roku OS the UI is ready
 end sub
 
 sub observeTimer(id as String, handler as String, start as Boolean)
@@ -233,6 +234,7 @@ sub fetchWeather()
     m.wxTask.observeField("result", "onWeatherResult")
     m.wxTask.control = "RUN"
     m.wxKey = CacheKey(m.prefs.loc, m.prefs.units)
+    print "[window] fetching weather for "; m.prefs.loc.name
     renderStatus()
 end sub
 
@@ -248,6 +250,7 @@ sub onWeatherResult()
     if r.ok
         if r.data.current <> invalid then good = true
     end if
+    print "[window] weather response "; r.code; " ok="; good
     if good
         m.data = r.data
         m.dataAt = NowEpoch()

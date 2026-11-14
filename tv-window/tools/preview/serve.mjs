@@ -2,7 +2,7 @@
 // Serves the in-browser Roku simulator (brs-engine + SceneGraph extension) running the channel.
 // Every request for app.zip repackages ../channel, so a browser reload picks up edits.
 //
-//   npm run preview   ->  http://localhost:8787/?seed=37.7749,-122.4194,San%20Francisco
+//   npm run preview   ->  http://localhost:8787/?seed=47.6062,-122.3321,Seattle
 //   add &mock=rain (clear|partly|overcast|rain|snow|storm|fog) to use a fake forecast instead of Open-Meteo
 import http from "node:http";
 import fs from "node:fs";

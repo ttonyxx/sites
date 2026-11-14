@@ -3,7 +3,7 @@
 ' RunScreenSaver() runs when the TV is idle and Window is chosen in
 ' Settings > Theme > Screensavers.
 
-sub Main(args as Dynamic)
+sub Main()
     RunWindow(false)
 end sub
 

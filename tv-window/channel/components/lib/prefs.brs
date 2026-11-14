@@ -8,7 +8,21 @@ function LoadPrefs() as Object
     sec = PrefsSection()
     p = { loc: invalid, units: "F", clock: "", layout: "full", api: "https://api.open-meteo.com" }
     if sec.Exists("api") then p.api = sec.Read("api") ' test hook used by the preview harness
-    if sec.Exists("loc") then p.loc = ParseJson(sec.Read("loc"))
+    if sec.Exists("loc")
+        p.loc = ParseJson(sec.Read("loc"))
+    else
+        ' First run: adopt the default from the (gitignored) pkg:/local.json and remember it on the TV.
+        raw = ReadAsciiFile("pkg:/local.json")
+        cfg = invalid
+        if raw <> "" then cfg = ParseJson(raw)
+        if cfg <> invalid
+            if cfg.loc <> invalid
+                p.loc = cfg.loc
+                sec.Write("loc", FormatJson(cfg.loc))
+                sec.Flush()
+            end if
+        end if
+    end if
     if sec.Exists("units") then p.units = sec.Read("units")
     if sec.Exists("clock") then p.clock = sec.Read("clock")
     if sec.Exists("layout") then p.layout = sec.Read("layout")
