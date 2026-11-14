@@ -98,5 +98,9 @@ export async function renderDibs({ browser, IMG, FONTS, TOOLS }) {
       <div style="font:26px/1.25 Body;margin-top:14px;opacity:.88">${blurb}</div>
       <div style="margin-top:auto;font:700 22px Brico;opacity:.7">${players}</div></div>`);
   }
+  // App dock icons: Dibs (the mascot box) and a generic music glyph for music apps.
+  await shot("app_dibs.png", 192, 192, MASCOT.replace('width="112" height="112"', 'width="192" height="192"'));
+  await shot("app_music.png", 192, 192, `<svg viewBox="0 0 64 64" width="192" height="192"><g fill="none" stroke="#fff" stroke-width="5" stroke-linecap="round">
+    <path d="M17 25 Q32 19 47 25"/><path d="M19 33 Q32 28.5 45 33"/><path d="M21 41 Q32 37.5 43 41"/></g></svg>`);
   await page.close();
 }

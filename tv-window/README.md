@@ -18,9 +18,15 @@ the TV into an ambient dashboard:
 - **Time travel:** press ◀ / ▶ to scrub the sky and forecast through the day. The ↺ Replay key
   returns to now, and so does a minute without input. The TV keeps the Back key for itself, so
   apps never see it.
-- **Play Dibs:** press ▼ to host a [Dibs](https://dibsgames.com) party game on the TV. Pick a game
+- **App dock:** always on screen, Dibs and Spotify to start with. ▼ moves into the dock, ◀ ▶ pick, OK
+  opens, ▲ leaves. Roku won't let a channel launch other apps, so Roku apps (like Spotify) are opened
+  through the home streamer, which sends the TV an ECP `launch`. Add more with `apps` in `local.json`.
+- **Host Dibs:** the Dibs tile hosts a [Dibs](https://dibsgames.com) party game on the TV. Pick a game,
   and the TV shows the room (QR code, players, the whole game) while everyone plays on their phones.
-  See *Hosting Dibs on the TV* below. Without a streamer it falls back to AirPlay instructions.
+  The Replay key goes back to Window and *parks* the game: the room keeps running, the Dibs tile shows
+  LIVE, and "Back to <game>" returns to it, even after you leave Window for up to 15 minutes. ✱ on
+  that button ends the room. See *Hosting Dibs on the TV* below. Without a streamer, the tile shows
+  AirPlay instructions instead.
 - **Screensaver:** Window is also a Roku screensaver, so it can appear whenever the TV is idle.
 
 This folder is not a website. It has no `index.html` or top-level `package.json`, so
@@ -59,7 +65,8 @@ the TV's default "Limited" mode, so an app row would need a small always-on help
      "logo": "pkg:/local/logo.png",
      "logoAspect": 1.0,
      "album": "https://photos.app.goo.gl/…",
-     "dibsStreamer": "http://192.168.1.20:8790"
+     "dibsStreamer": "http://192.168.1.20:8790",
+     "apps": [{ "kind": "dibs", "name": "Dibs" }, { "id": "22297", "name": "Spotify", "color": "0x1DB954FF" }]
    }
    ```
 
@@ -70,7 +77,9 @@ the TV's default "Limited" mode, so an app row would need a small always-on help
      on a black background into `channel/local/logo.png` and prints its `logoAspect`.
    - `album` is a public Google Photos shared-album link. The TV re-reads it every 6 hours, so new
      photos show up without reinstalling.
-   - `dibsStreamer` is the address of a Dibs TV streamer (see *Hosting Dibs on the TV*).
+   - `dibsStreamer` pins a streamer address, if discovery can't find one (see *Hosting Dibs on the TV*).
+   - `apps` replaces the dock's apps. Each entry needs `name`, plus `id` (a Roku channel id) or
+     `"kind": "dibs"`. Optional: `color` (`0xRRGGBBFF`) and `icon` (a `pkg:` image).
 4. **Make it the screensaver** (optional): Home › Settings › Theme › Screensavers › **Window**.
 
 To uninstall, open the TV's installer page (`http://<tv-ip>`) and choose *Delete*, or turn off
@@ -82,13 +91,23 @@ Roku has no web engine and no WebSocket client, so it can't run the Dibs web app
 `/tv` screen takes no input (everyone plays on their phones), so **`tools/streamer/streamer.mjs`**
 runs it in headless Chrome and streams it to the TV as live video (HLS):
 
+**On a Mac that stays on at home**, install it as a background service (it starts at login and
+restarts itself; re-run to update, or add `-s -- --uninstall` to remove it):
+
 ```bash
-cd tv-window/tools && node streamer/streamer.mjs   # listens on :8790, prints the URL for the TV
+curl -fsSL https://raw.githubusercontent.com/ttonyxx/sites/main/tv-window/tools/streamer/install-mac.sh | bash
 ```
 
-Then add `"dibsStreamer": "http://<that machine's IP>:8790"` to `channel/local.json`. On the TV, press ▼,
-pick a game, and the streamer opens dibsgames.com/tv, clicks that game, and streams the room.
-The Replay key (or ✱) ends it. The streamer also stops itself 45 s after the TV stops watching.
+To try it from a checkout instead: `cd tv-window/tools && node streamer/streamer.mjs`.
+
+The streamer answers SSDP searches (`urn:tonyxin-com:service:dibs-tv-streamer:1`), so Window finds
+it on the Wi-Fi by itself. `"dibsStreamer": "http://ip:8790"` in `local.json` is only a fallback.
+Pick a game on the TV, and the streamer opens dibsgames.com/tv, clicks that game, and streams the room.
+It keeps the Mac awake only while a room is running. It stops a room after 15 minutes with no word
+from the TV (`IDLE_MINUTES`).
+
+The same service relays app launches: `POST /launch?app=<roku channel id>` sends the TV that asked
+an ECP `launch` (allowed in "Limited" mode). That's how the dock opens Spotify (channel `22297`).
 
 - **Deep link:** `curl -X POST "http://<tv-ip>:8060/launch/dev?dibs=punchline"` starts Window and
   hosts that game right away. This works in the TV's default "Limited" control mode. Game ids:
@@ -127,6 +146,7 @@ channel/                 the Roku package (zipped as-is)
     DibsPanel.*          "Play Dibs": game picker + stream player, or the AirPlay card
                          (art rendered by tools/assets/dibs.mjs)
     AlbumTask.*          reads a shared-album page for its photo URLs
+    DiscoverTask.*       finds the home streamer on the LAN (SSDP)
     SettingsPanel.*      slide-in settings with keyboard city search
     FetchTask.*          HTTPS GET on a background thread
     lib/                 sky model, weather mapping, prefs, helpers

@@ -72,7 +72,17 @@ sub init()
     m.settings.observeField("closed", "onSettingsClosed")
     m.dibs = m.top.findNode("dibs")
     m.dibs.observeField("closed", "onSettingsClosed")
-    if m.local.dibsStreamer <> invalid then m.dibs.streamer = m.local.dibsStreamer
+    m.streamer = ""
+    if m.local.dibsStreamer <> invalid then m.streamer = m.local.dibsStreamer
+    m.dibs.streamer = m.streamer
+    m.apps = DefaultApps()
+    m.dibs.observeField("live", "renderDockBadge")
+    m.dibs.observeField("parked", "onDibsParked")
+    m.dockBadge = invalid
+    if m.local.apps <> invalid then m.apps = m.local.apps
+    m.dockFocus = -1
+    m.dockRing = invalid
+    m.discoverTask = invalid
 
     observeTimer("tick", "onTick", true)
     observeTimer("refresh", "fetchWeather", true)
@@ -82,11 +92,14 @@ sub init()
     observeTimer("driftTimer", "onDrift", false)
     observeTimer("albumTimer", "loadAlbum", true)
     observeTimer("travelTimer", "endTimeTravel", false)
+    observeTimer("discoverTimer", "discoverStreamer", true)
+    observeTimer("dockIdle", "leaveDock", false)
 
     loadCachedWeather()
     buildLayout()
     applyBackground()
     loadAlbum()
+    discoverStreamer()
     onTick()
     fetchWeather()
     showHints()
@@ -108,7 +121,7 @@ sub buildLayout()
     if BackgroundMode() <> "sky" then mode = "panel"
     if mode = m.layoutMode then return
     m.layoutMode = mode
-    for each id in ["panelBg", "header", "clock", "now", "cards"]
+    for each id in ["panelBg", "header", "clock", "now", "cards", "dock"]
         g = m.top.findNode(id)
         g.removeChildrenIndex(g.getChildCount(), 0)
     end for
@@ -135,6 +148,7 @@ sub buildLayout()
         m.top.findNode("hints").translation = [m.LEFT - 24, 970]
     end if
 
+    buildDock()
     m.lastMinute = -1
     renderWeather()
     renderClock(ClockNow())
@@ -253,7 +267,7 @@ sub buildHints()
     pill.opacity = 0.72
     m.hintItems = []
     x = 24
-    for each item in [["key_star", 60, "Settings"], ["key_ok", 72, "Minimal"], ["key_lr", 76, "Time travel"], ["key_down", 60, "Play Dibs"]]
+    for each item in [["key_star", 60, "Settings"], ["key_ok", 72, "Minimal"], ["key_lr", 76, "Time travel"], ["key_down", 60, "Apps"]]
         AddPoster(g, "pkg:/images/" + item[0] + ".png", x, 13, item[1] * 0.8, 48 * 0.8)
         l = AddLabel(g, m.f.hint, White(0.8), x + item[1] * 0.8 + 14, 15)
         l.text = item[2]
@@ -629,6 +643,7 @@ sub onScreensaverSet()
     if not m.top.screensaver then return
     m.top.findNode("hints").visible = false
     m.top.findNode("toast").visible = false
+    m.top.findNode("dock").visible = false
     m.top.findNode("driftTimer").control = "start"
 end sub
 
@@ -638,6 +653,151 @@ sub onDrift()
     target = [Rnd(48) - 24, Rnd(36) - 18]
     interp.keyValue = [m.content.translation, target]
     m.top.findNode("drift").control = "start"
+end sub
+
+' ---- app dock ----------------------------------------------------------------------------------
+' Always on screen. Down moves into it, left/right pick, OK opens, up leaves. Dibs opens the game picker;
+' other apps are Roku channels, launched through the home streamer (Roku won't let a channel launch apps).
+
+function DefaultApps() as Object
+    return [
+        { kind: "dibs", name: "Dibs" }
+        { kind: "roku", id: "22297", name: "Spotify", color: "0x1DB954FF", icon: "pkg:/images/app_music.png" }
+    ]
+end function
+
+sub buildDock()
+    g = m.top.findNode("dock")
+    g.removeChildrenIndex(g.getChildCount(), 0)
+    m.dockTiles = []
+    n = m.apps.Count()
+    if n = 0 then return
+    panel = m.layoutMode = "panel"
+    s = 96 : gap = 28 : pad = 18 : font = m.f.pDetail
+    if panel
+        s = 116 : gap = 34 : pad = 22
+    end if
+    w = n * s + (n - 1) * gap + pad * 2
+    h = s + 40 + pad * 2 - 6
+    if panel
+        g.translation = [1920 - 56 - w, 1080 - 48 - h]
+    else
+        g.translation = [m.RIGHT - w + pad, 486]
+    end if
+    bg = AddPoster(g, "pkg:/images/pill.9.png", 0, 0, w, h)
+    bg.blendColor = "0x0A0F1CFF"
+    bg.opacity = 0.4
+    if panel then bg.opacity = 0.66
+    m.dockRing = AddPoster(g, "pkg:/images/ring.9.png", 0, 0, s + 20, s + 20)
+    for i = 0 to n - 1
+        a = m.apps[i]
+        x = pad + i * (s + gap)
+        y = pad
+        if a.kind = "dibs"
+            AddPoster(g, "pkg:/images/app_dibs.png", x, y, s, s)
+            ' "LIVE" badge while a hosted Dibs room is running (parked or on screen).
+            m.dockBadge = g.CreateChild("Group")
+            m.dockBadge.translation = [x + s - 52, y - 12]
+            badgeBg = AddPoster(m.dockBadge, "pkg:/images/pill.9.png", 0, 0, 74, 34)
+            badgeBg.blendColor = "0xFF6B57FF"
+            badgeText = AddLabel(m.dockBadge, m.f.pPop, White(1), 0, 6)
+            badgeText.width = 74
+            badgeText.horizAlign = "center"
+            badgeText.text = "LIVE"
+        else
+            tile = AddPoster(g, "pkg:/images/card.9.png", x, y, s, s)
+            tile.blendColor = "0x2A3550FF"
+            if a.color <> invalid then tile.blendColor = a.color
+            if a.icon <> invalid
+                AddPoster(g, a.icon, x, y, s, s)
+            else
+                letter = AddLabel(g, m.f.pTemp, White(1), x, y + s * 0.08)
+                letter.width = s
+                letter.horizAlign = "center"
+                letter.text = UCase(Left(a.name, 1))
+            end if
+        end if
+        lbl = AddLabel(g, font, White(0.86), x - 24, y + s + 6)
+        lbl.width = s + 48
+        lbl.horizAlign = "center"
+        lbl.text = a.name
+        m.dockTiles.Push([x, y])
+    end for
+    renderDockFocus()
+    renderDockBadge()
+end sub
+
+sub renderDockBadge()
+    if m.dockBadge <> invalid then m.dockBadge.visible = m.dibs.live <> ""
+end sub
+
+sub onDibsParked()
+    showToast(m.dibs.live + " is still running   " + Chr(183) + "   Down, then OK on Dibs to go back")
+end sub
+
+sub renderDockFocus()
+    if m.dockRing = invalid then return
+    f = m.dockFocus
+    m.dockRing.visible = f >= 0 and f < m.dockTiles.Count()
+    if m.dockRing.visible then m.dockRing.translation = [m.dockTiles[f][0] - 10, m.dockTiles[f][1] - 10]
+end sub
+
+sub restartDockIdle()
+    t = m.top.findNode("dockIdle")
+    t.control = "stop"
+    t.control = "start"
+end sub
+
+sub leaveDock()
+    m.dockFocus = -1
+    m.top.findNode("dockIdle").control = "stop"
+    renderDockFocus()
+end sub
+
+sub activateApp(i as Integer)
+    a = m.apps[i]
+    kind = "roku"
+    if a.kind <> invalid then kind = a.kind
+    if kind = "dibs"
+        m.dibs.open = true
+        Fade(m.top.findNode("hints"), 0.0, 0.2)
+        return
+    end if
+    if m.streamer = ""
+        showToast("Opening apps needs the home streamer (see Play Dibs)")
+        return
+    end if
+    showToast("Opening " + a.name + Chr(8230))
+    m.launchName = a.name
+    m.launchTask = CreateObject("roSGNode", "FetchTask")
+    m.launchTask.method = "POST"
+    m.launchTask.url = m.streamer + "/launch?app=" + a.id
+    m.launchTask.observeField("result", "onLaunchResult")
+    m.launchTask.control = "RUN"
+end sub
+
+sub onLaunchResult()
+    r = m.launchTask.result
+    if not r.ok then showToast("Couldn" + Chr(8217) + "t open " + m.launchName)
+end sub
+
+' The home streamer (Dibs hosting + app launching) announces itself on the LAN; local.json can pin one.
+sub discoverStreamer()
+    if m.discoverTask <> invalid then return
+    m.discoverTask = CreateObject("roSGNode", "DiscoverTask")
+    m.discoverTask.observeField("result", "onDiscover")
+    m.discoverTask.control = "RUN"
+end sub
+
+sub onDiscover()
+    found = m.discoverTask.result
+    m.discoverTask = invalid
+    if found <> ""
+        m.streamer = found
+    else if m.local.dibsStreamer <> invalid
+        m.streamer = m.local.dibsStreamer
+    end if
+    m.dibs.streamer = m.streamer
 end sub
 
 ' ---- deep links ------------------------------------------------------------------------------
@@ -687,6 +847,26 @@ end sub
 function onKeyEvent(key as String, press as Boolean) as Boolean
     if not press then return false
     if m.top.screensaver then return false
+    if m.dockFocus >= 0
+        restartDockIdle()
+        if key = "left" or key = "rev"
+            if m.dockFocus > 0 then m.dockFocus = m.dockFocus - 1
+            renderDockFocus()
+        else if key = "right" or key = "fwd"
+            if m.dockFocus < m.apps.Count() - 1 then m.dockFocus = m.dockFocus + 1
+            renderDockFocus()
+        else if key = "OK"
+            i = m.dockFocus
+            leaveDock()
+            activateApp(i)
+        else if key = "up" or key = "back" or key = "replay"
+            leaveDock()
+        else if key = "options"
+            leaveDock()
+            openSettings()
+        end if
+        return true
+    end if
     if key = "options"
         openSettings()
         return true
@@ -697,8 +877,11 @@ function onKeyEvent(key as String, press as Boolean) as Boolean
         showHints()
         return true
     else if key = "down"
-        m.dibs.open = true
-        Fade(m.top.findNode("hints"), 0.0, 0.2)
+        if m.apps.Count() > 0
+            m.dockFocus = 0
+            renderDockFocus()
+            restartDockIdle()
+        end if
         return true
     else if key = "right" or key = "fwd"
         shiftTime(1)

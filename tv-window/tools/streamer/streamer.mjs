@@ -9,8 +9,11 @@
 //   PORT=8790 DIBS_URL=https://dibsgames.com node streamer.mjs
 //
 // API:  GET /status   POST /start?game=<punchline|imposter|tee-party|brawl|piggyback|pirates>   POST /stop
+//       POST /launch?app=<roku channel id>  opens another app on the TV that asked (Roku won't let a channel
+//       launch apps itself, but accepts ECP "launch" from another device on the LAN, even in Limited mode)
 //       GET /live/index.m3u8 (+ segments)    GET /frame.jpg (latest frame, for debugging)
 import http from "node:http";
+import dgram from "node:dgram";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -22,8 +25,16 @@ const puppeteer = require("puppeteer-core");
 
 const PORT = Number(process.env.PORT || 8790);
 const DIBS = (process.env.DIBS_URL || "https://dibsgames.com").replace(/\/$/, "");
-const CHROME = process.env.CHROME_PATH || "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
-const FFMPEG = process.env.FFMPEG_PATH || "ffmpeg";
+const firstExisting = (...paths) => paths.find((p) => p && fs.existsSync(p));
+const CHROME = process.env.CHROME_PATH || firstExisting(
+  "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+  "/Applications/Chromium.app/Contents/MacOS/Chromium",
+  "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser",
+  "/usr/bin/chromium", "/usr/bin/chromium-browser", "/usr/bin/google-chrome",
+);
+const FFMPEG = process.env.FFMPEG_PATH || firstExisting("/opt/homebrew/bin/ffmpeg", "/usr/local/bin/ffmpeg", "/usr/bin/ffmpeg") || "ffmpeg";
+// TVs find the streamer on the LAN by sending an SSDP M-SEARCH for this service type.
+const SSDP_ST = "urn:tonyxin-com:service:dibs-tv-streamer:1";
 const FPS = Number(process.env.FPS || 30);
 const LIVE = fs.mkdtempSync(path.join(os.tmpdir(), "dibs-live-"));
 
@@ -41,10 +52,12 @@ let browser = null;
 let session = null; // { page, cdp, ffmpeg, timer, frame, game, code, startedAt }
 let lastHit = 0; // last time a TV fetched the stream
 
-// If the TV stops fetching the stream (Home button, TV off), stop rendering after a while.
+// The TV fetches the stream while it's on screen and polls /status while the room is parked, so phones can
+// keep playing while Window is away. With no TV contact for 15 minutes (TV off, another app), stop.
+const IDLE_MS = Number(process.env.IDLE_MINUTES || 15) * 60000;
 setInterval(() => {
-  if (session && Date.now() - session.startedAt > 60000 && Date.now() - lastHit > 45000) {
-    log("no viewer for 45 s, stopping");
+  if (session && Date.now() - session.startedAt > 60000 && Date.now() - lastHit > IDLE_MS) {
+    log(`no TV contact for ${IDLE_MS / 60000} min, stopping`);
     stop();
   }
 }, 10000);
@@ -71,6 +84,7 @@ async function stop() {
   session = null;
   if (!s) return;
   clearInterval(s.timer);
+  try { s.awake?.kill(); } catch {}
   try { s.ffmpeg.stdin.end(); } catch {}
   setTimeout(() => s.ffmpeg.kill("SIGKILL"), 2000);
   try { await s.cdp.send("Page.stopScreencast"); } catch {}
@@ -134,6 +148,9 @@ async function start(gameId) {
     if (s.frame && !ffmpeg.stdin.destroyed) ffmpeg.stdin.write(s.frame);
   }, 1000 / FPS);
   session = s;
+  lastHit = Date.now();
+  // Keep the Mac from idle-sleeping while a game is on the TV (macOS only).
+  if (process.platform === "darwin") s.awake = spawn("/usr/bin/caffeinate", ["-i", "-w", String(process.pid)], { stdio: "ignore" });
 
   // Answer once the playlist has a couple of segments so the TV can start playing right away.
   const t0 = Date.now();
@@ -153,10 +170,19 @@ http
     const json = (code, body) => { res.writeHead(code, { "Content-Type": "application/json", "Cache-Control": "no-store" }); res.end(JSON.stringify(body)); };
     try {
       if (url.pathname === "/status") {
+        if (session) lastHit = Date.now();
         return json(200, { running: !!session, game: session?.game ?? null, code: session?.code ?? null, frames: session?.frames ?? 0, games: Object.keys(GAMES) });
       }
       if (url.pathname === "/start" && req.method === "POST") return json(200, await start(url.searchParams.get("game") || "punchline"));
       if (url.pathname === "/stop" && req.method === "POST") { await stop(); return json(200, { ok: true }); }
+      if (url.pathname === "/launch" && req.method === "POST") {
+        const app = url.searchParams.get("app") || "";
+        const tv = (url.searchParams.get("tv") || req.socket.remoteAddress || "").replace(/^::ffff:/, "");
+        if (!/^[A-Za-z0-9_]{1,32}$/.test(app) || !/^\d{1,3}(\.\d{1,3}){3}$/.test(tv)) return json(400, { ok: false, error: "bad app or tv" });
+        const r = await fetch(`http://${tv}:8060/launch/${app}`, { method: "POST", signal: AbortSignal.timeout(5000) });
+        log("launch", app, "on", tv, "->", r.status);
+        return json(r.ok ? 200 : 502, { ok: r.ok, status: r.status });
+      }
       if (url.pathname === "/frame.jpg" && session?.frame) { res.writeHead(200, { "Content-Type": "image/jpeg" }); return res.end(session.frame); }
       if (url.pathname.startsWith("/live/")) {
         lastHit = Date.now();
@@ -175,5 +201,30 @@ http
     const ips = Object.values(os.networkInterfaces()).flat().filter((i) => i && i.family === "IPv4" && !i.internal).map((i) => i.address);
     log(`Dibs TV streamer on :${PORT}  (TV should use http://${ips[0] || "localhost"}:${PORT})  rendering ${DIBS}/tv`);
   });
+
+// ---- LAN discovery (SSDP) ---------------------------------------------------------------------
+function lanAddressFor(remote) {
+  const ips = Object.values(os.networkInterfaces()).flat().filter((i) => i && i.family === "IPv4" && !i.internal);
+  const same = ips.find((i) => remote && i.address.split(".").slice(0, 3).join(".") === remote.split(".").slice(0, 3).join("."));
+  return (same || ips[0])?.address || "127.0.0.1";
+}
+const ssdp = dgram.createSocket({ type: "udp4", reuseAddr: true });
+ssdp.on("message", (msg, rinfo) => {
+  const text = msg.toString();
+  if (!/^M-SEARCH/i.test(text)) return;
+  const st = (text.match(/^ST:\s*(.+)$/im) || [])[1]?.trim();
+  if (st !== SSDP_ST && st !== "ssdp:all") return;
+  const reply = [
+    "HTTP/1.1 200 OK", "CACHE-CONTROL: max-age=60", "EXT:",
+    `LOCATION: http://${lanAddressFor(rinfo.address)}:${PORT}/`,
+    `SERVER: ${os.type()}/${os.release()} UPnP/1.0 dibs-tv-streamer/1`,
+    `ST: ${SSDP_ST}`, `USN: uuid:dibs-tv-streamer-${os.hostname()}::${SSDP_ST}`, "", "",
+  ].join("\r\n");
+  ssdp.send(reply, rinfo.port, rinfo.address);
+});
+ssdp.on("error", (e) => log("ssdp:", e.message));
+ssdp.bind(1900, () => {
+  try { ssdp.addMembership("239.255.255.250"); } catch (e) { log("ssdp membership:", e.message); }
+});
 
 for (const sig of ["SIGINT", "SIGTERM"]) process.on(sig, async () => { await stop(); await browser?.close(); process.exit(0); });

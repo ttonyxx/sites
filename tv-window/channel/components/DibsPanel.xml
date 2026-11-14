@@ -1,15 +1,18 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  "Play Dibs". With a Dibs TV streamer configured (local.json "dibsStreamer"), it's a game picker: the
-  streamer hosts the room in a headless browser and this plays it full-screen. Without one, it shows how to
-  mirror dibsgames.com/tv from a laptop or phone (AirPlay / Screen Mirroring).
+  "Play Dibs". With a Dibs TV streamer (found on the LAN, or local.json "dibsStreamer"), it's a game picker:
+  the streamer hosts the room in a headless browser and this plays it full-screen. Leaving the stream parks
+  the room (it keeps running); "Back to <game>" returns to it. Without a streamer it shows how to mirror
+  dibsgames.com/tv from a laptop or phone (AirPlay / Screen Mirroring).
 -->
 <component name="DibsPanel" extends="Group">
   <interface>
     <field id="open" type="boolean" onChange="onOpen" />
     <field id="closed" type="boolean" alwaysNotify="true" />
-    <field id="streamer" type="string" />
+    <field id="parked" type="boolean" alwaysNotify="true" />
+    <field id="streamer" type="string" onChange="onStreamer" />
     <field id="autostart" type="string" alwaysNotify="true" onChange="onAutostart" />
+    <field id="live" type="string" />
   </interface>
   <script type="text/brightscript" uri="DibsPanel.brs" />
   <script type="text/brightscript" uri="lib/util.brs" />
@@ -22,11 +25,15 @@
         <Label id="closeHint" translation="[320,950]" width="1280" horizAlign="center" />
       </Group>
       <Group id="pickMode" visible="false">
-        <Poster uri="pkg:/images/dibs_header.png" translation="[260,90]" width="1400" height="150" />
+        <Poster uri="pkg:/images/dibs_header.png" translation="[260,70]" width="1400" height="150" />
+        <Group id="resume" visible="false">
+          <Poster id="resumeBg" uri="pkg:/images/pill.9.png" height="64" blendColor="0xFF6B57FF" />
+          <Label id="resumeText" translation="[0,15]" horizAlign="center" />
+        </Group>
         <Group id="tiles" />
         <Poster id="ring" uri="pkg:/images/ring.9.png" width="472" height="282" />
-        <Label id="pickHint" translation="[260,890]" width="1400" horizAlign="center" />
-        <Label id="pickNote" translation="[260,944]" width="1400" horizAlign="center" />
+        <Label id="pickHint" translation="[260,906]" width="1400" horizAlign="center" />
+        <Label id="pickNote" translation="[260,958]" width="1400" horizAlign="center" />
       </Group>
     </Group>
     <Video id="video" width="1920" height="1080" visible="false" enableUI="false" />
@@ -36,6 +43,7 @@
     </Group>
     <Timer id="autoClose" duration="120" repeat="false" />
     <Timer id="statusTimer" duration="5" repeat="false" />
+    <Timer id="poll" duration="30" repeat="true" />
     <Animation id="pop" duration="0.3" easeFunction="outCubic">
       <FloatFieldInterpolator key="[0,1]" keyValue="[0,1]" fieldToInterp="body.opacity" />
       <Vector2DFieldInterpolator key="[0,1]" keyValue="[[0,30],[0,0]]" fieldToInterp="body.translation" />

@@ -19,6 +19,7 @@
       <Group id="clock" />
       <Group id="now" />
       <Group id="cards" />
+      <Group id="dock" />
       <Label id="status" />
     </Group>
     <Group id="hints" opacity="0" />
@@ -34,6 +35,8 @@
     <Timer id="driftTimer" repeat="true" duration="90" />
     <Timer id="albumTimer" repeat="true" duration="21600" />
     <Timer id="travelTimer" repeat="false" duration="60" />
+    <Timer id="discoverTimer" repeat="true" duration="300" />
+    <Timer id="dockIdle" repeat="false" duration="20" />
 
     <Animation id="drift" duration="30" easeFunction="inOutQuad">
       <Vector2DFieldInterpolator id="driftInterp" key="[0,1]" fieldToInterp="content.translation" />
