@@ -69,8 +69,10 @@ async function install(host, password) {
   const zip = buildPackage();
   const html = await curl(password, ["-F", "mysubmit=Replace", "-F", `archive=@${zip}`, `http://${host}/plugin_install`]);
   if (/401|Unauthorized/i.test(html) && !/Install Success|Identical/i.test(html)) throw new Error("The TV rejected the password (user is rokudev).");
-  const msgs = [...html.matchAll(/'(Install (?:Success|Failure)[^']*|Identical to previous version[^']*|Application Received[^']*)'/g)].map((m) => m[1]);
-  const text = msgs.join(" | ") || html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").slice(0, 200);
+  // Newer Roku OS embeds the status as JSON ({"messages":[{"text":"Install Success."}]}); older builds use plain HTML.
+  const msgs = [...html.matchAll(/"text":"([^"]*)"/g)].map((m) => m[1]);
+  if (!msgs.length) msgs.push(...[...html.matchAll(/(Install (?:Success|Failure)[^<'"]*|Identical to previous version[^<'"]*)/g)].map((m) => m[1]));
+  const text = [...new Set(msgs)].join(" ") || "no status message";
   if (/Failure|Compilation Failed/i.test(html)) throw new Error(`Install failed: ${text}`);
   console.log(`✓ Installed on ${host}  (${text})`);
 }

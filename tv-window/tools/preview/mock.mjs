@@ -36,8 +36,8 @@ export function mockForecast(scenario, searchParams) {
   const hours = Array.from({ length: 36 }, (_, i) => hourStart + i * 3600);
   const days = Array.from({ length: 7 }, (_, i) => today + i * 86400);
   return {
-    latitude: 37.77,
-    longitude: -122.42,
+    latitude: 47.61,
+    longitude: -122.33,
     utc_offset_seconds: offset,
     current: {
       time: now,

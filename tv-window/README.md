@@ -39,7 +39,11 @@ Netflix and other apps. It's a dashboard and screensaver, not an app launcher.
    This packages `channel/`, finds the TV on the network, asks for the developer password at a
    hidden prompt, installs, and saves a screenshot from the TV to `tools/dist/screenshot.jpg`.
    `npm run dev` does the same, then reinstalls every time a file in `channel/` changes.
-3. **Make it the screensaver** (optional): Home › Settings › Theme › Screensavers › **Window**.
+3. **Default location** (optional): create `channel/local.json` with
+   `{"loc": {"name": "Chicago", "region": "Illinois, US", "lat": 41.88, "lon": -87.63}}`. Git ignores
+   this file, so it's packaged onto the TV but never committed. On first launch the TV saves it to its own
+   settings. Rounded coordinates (2 decimals, about 1 km) are plenty for weather.
+4. **Make it the screensaver** (optional): Home › Settings › Theme › Screensavers › **Window**.
 
 To uninstall, open the TV's installer page (`http://<tv-ip>`) and choose *Delete*, or turn off
 Developer Mode.
