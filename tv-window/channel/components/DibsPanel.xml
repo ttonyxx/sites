@@ -1,24 +1,47 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- "Play Dibs" overlay: how to put dibsgames.com/tv on this TV (mirrored from a laptop or phone). -->
+<!--
+  "Play Dibs". With a Dibs TV streamer configured (local.json "dibsStreamer"), it's a game picker: the
+  streamer hosts the room in a headless browser and this plays it full-screen. Without one, it shows how to
+  mirror dibsgames.com/tv from a laptop or phone (AirPlay / Screen Mirroring).
+-->
 <component name="DibsPanel" extends="Group">
   <interface>
     <field id="open" type="boolean" onChange="onOpen" />
     <field id="closed" type="boolean" alwaysNotify="true" />
+    <field id="streamer" type="string" />
+    <field id="autostart" type="string" alwaysNotify="true" onChange="onAutostart" />
   </interface>
   <script type="text/brightscript" uri="DibsPanel.brs" />
   <script type="text/brightscript" uri="lib/util.brs" />
   <children>
-    <Rectangle id="dim" width="1920" height="1080" color="0x07050DFF" opacity="0.82" />
+    <Rectangle id="dim" width="1920" height="1080" color="0x120C1EFF" opacity="0.94" />
     <Group id="body">
-      <Poster id="card" uri="pkg:/images/dibs_card.png" translation="[320,150]" width="1280" height="720" />
-      <Label id="tvName" translation="[320,900]" width="1280" horizAlign="center" />
-      <Label id="closeHint" translation="[320,950]" width="1280" horizAlign="center" />
+      <Group id="cardMode">
+        <Poster uri="pkg:/images/dibs_card.png" translation="[320,150]" width="1280" height="720" />
+        <Label id="tvName" translation="[320,900]" width="1280" horizAlign="center" />
+        <Label id="closeHint" translation="[320,950]" width="1280" horizAlign="center" />
+      </Group>
+      <Group id="pickMode" visible="false">
+        <Poster uri="pkg:/images/dibs_header.png" translation="[260,90]" width="1400" height="150" />
+        <Group id="tiles" />
+        <Poster id="ring" uri="pkg:/images/ring.9.png" width="472" height="282" />
+        <Label id="pickHint" translation="[260,890]" width="1400" horizAlign="center" />
+        <Label id="pickNote" translation="[260,944]" width="1400" horizAlign="center" />
+      </Group>
+    </Group>
+    <Video id="video" width="1920" height="1080" visible="false" enableUI="false" />
+    <Group id="status" visible="false">
+      <Poster id="statusBg" uri="pkg:/images/pill.9.png" height="84" blendColor="0x221836FF" opacity="0.92" />
+      <Label id="statusText" translation="[40,22]" />
     </Group>
     <Timer id="autoClose" duration="120" repeat="false" />
+    <Timer id="statusTimer" duration="5" repeat="false" />
     <Animation id="pop" duration="0.3" easeFunction="outCubic">
       <FloatFieldInterpolator key="[0,1]" keyValue="[0,1]" fieldToInterp="body.opacity" />
       <Vector2DFieldInterpolator key="[0,1]" keyValue="[[0,30],[0,0]]" fieldToInterp="body.translation" />
-      <FloatFieldInterpolator key="[0,1]" keyValue="[0,0.82]" fieldToInterp="dim.opacity" />
+    </Animation>
+    <Animation id="ringMove" duration="0.18" easeFunction="outCubic">
+      <Vector2DFieldInterpolator id="ringInterp" key="[0,1]" fieldToInterp="ring.translation" />
     </Animation>
   </children>
 </component>

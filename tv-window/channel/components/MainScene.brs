@@ -72,6 +72,7 @@ sub init()
     m.settings.observeField("closed", "onSettingsClosed")
     m.dibs = m.top.findNode("dibs")
     m.dibs.observeField("closed", "onSettingsClosed")
+    if m.local.dibsStreamer <> invalid then m.dibs.streamer = m.local.dibsStreamer
 
     observeTimer("tick", "onTick", true)
     observeTimer("refresh", "fetchWeather", true)
@@ -637,6 +638,17 @@ sub onDrift()
     target = [Rnd(48) - 24, Rnd(36) - 18]
     interp.keyValue = [m.content.translation, target]
     m.top.findNode("drift").control = "start"
+end sub
+
+' ---- deep links ------------------------------------------------------------------------------
+
+sub onLaunchArgs()
+    a = m.top.launchArgs
+    if a = invalid or m.top.screensaver then return
+    if a.dibs <> invalid
+        m.dibs.open = true
+        m.dibs.autostart = a.dibs
+    end if
 end sub
 
 ' ---- settings ------------------------------------------------------------------------------------

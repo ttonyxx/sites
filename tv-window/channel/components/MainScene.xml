@@ -2,6 +2,7 @@
 <component name="MainScene" extends="Scene">
   <interface>
     <field id="screensaver" type="boolean" value="false" onChange="onScreensaverSet" />
+    <field id="launchArgs" type="assocarray" onChange="onLaunchArgs" />
   </interface>
   <script type="text/brightscript" uri="MainScene.brs" />
   <script type="text/brightscript" uri="lib/util.brs" />
