@@ -12,12 +12,15 @@
 //       POST /launch?app=<roku channel id>  opens another app on the TV that asked (Roku won't let a channel
 //       launch apps itself, but accepts ECP "launch" from another device on the LAN, even in Limited mode)
 //       GET /live/index.m3u8 (+ segments)    GET /frame.jpg (latest frame, for debugging)
+//       GET /diag (health: capture rate, how far the stream is behind real time, GPU)   GET /log
+//       POST /update  re-downloads this file from GitHub and restarts (launchd brings it back up)
 import http from "node:http";
 import dgram from "node:dgram";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { spawn } from "node:child_process";
+import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
 
 const require = createRequire(import.meta.url);
@@ -37,6 +40,8 @@ const FFMPEG = process.env.FFMPEG_PATH || firstExisting("/opt/homebrew/bin/ffmpe
 const SSDP_ST = "urn:tonyxin-com:service:dibs-tv-streamer:1";
 const FPS = Number(process.env.FPS || 30);
 const LIVE = fs.mkdtempSync(path.join(os.tmpdir(), "dibs-live-"));
+const VERSION = "2026-11-14.3";
+const RAW = "https://raw.githubusercontent.com/ttonyxx/sites/main/tv-window/tools/streamer";
 
 // Game ids on the Roku side -> the name on the /tv hub's game cards.
 const GAMES = {
@@ -62,7 +67,13 @@ setInterval(() => {
   }
 }, 10000);
 
-const log = (...a) => console.log(new Date().toISOString().slice(11, 19), ...a);
+const LOG = [];
+const log = (...a) => {
+  const line = [new Date().toISOString().slice(11, 19), ...a].join(" ");
+  console.log(line);
+  LOG.push(line);
+  if (LOG.length > 300) LOG.shift();
+};
 
 async function getBrowser() {
   if (browser?.connected) return browser;
@@ -70,10 +81,45 @@ async function getBrowser() {
     executablePath: CHROME,
     headless: true,
     defaultViewport: { width: 1920, height: 1080, deviceScaleFactor: 1 },
-    args: ["--autoplay-policy=no-user-gesture-required", "--enable-gpu-rasterization", "--ignore-gpu-blocklist", "--disable-background-timer-throttling", "--disable-renderer-backgrounding", "--disable-backgrounding-occluded-windows"],
+    args: ["--autoplay-policy=no-user-gesture-required", "--enable-gpu-rasterization", "--ignore-gpu-blocklist", "--use-angle=metal", "--disable-background-timer-throttling", "--disable-renderer-backgrounding", "--disable-backgrounding-occluded-windows"],
   });
   return browser;
 }
+
+// A page already sitting on the /tv hub, so starting a room is just a click (refreshed every 30 min).
+let warm = null;
+let warmAt = 0;
+async function openHub() {
+  const b = await getBrowser();
+  const page = await b.newPage();
+  page.on("pageerror", (e) => log("page error:", e.message));
+  await page.goto(`${DIBS}/tv`, { waitUntil: "domcontentloaded", timeout: 30000 });
+  await page.waitForFunction((names) => names.every((n) => document.body.innerText.includes(n)), { timeout: 20000 }, Object.values(GAMES));
+  return page;
+}
+async function prewarm() {
+  if (session) return;
+  try {
+    if (warm && !warm.isClosed() && Date.now() - warmAt < 30 * 60000) return;
+    try { await warm?.close(); } catch {}
+    warm = null;
+    warm = await openHub();
+    warmAt = Date.now();
+    log("hub preloaded");
+  } catch (e) {
+    warm = null;
+    log("preload failed:", e.message);
+  }
+}
+async function takeHub() {
+  const p = warm;
+  warm = null;
+  if (p && !p.isClosed() && Date.now() - warmAt < 30 * 60000) return p;
+  try { await p?.close(); } catch {}
+  return openHub();
+}
+setInterval(prewarm, 5 * 60000);
+setTimeout(prewarm, 1000);
 
 function clearLive() {
   for (const f of fs.readdirSync(LIVE)) fs.rmSync(path.join(LIVE, f), { force: true });
@@ -90,6 +136,7 @@ async function stop() {
   try { await s.cdp.send("Page.stopScreencast"); } catch {}
   try { await s.page.close(); } catch {}
   log("stopped", s.game, s.code || "");
+  setTimeout(prewarm, 1500);
 }
 
 async function start(gameId) {
@@ -98,10 +145,7 @@ async function start(gameId) {
   await stop();
   clearLive();
 
-  const b = await getBrowser();
-  const page = await b.newPage();
-  page.on("pageerror", (e) => log("page error:", e.message));
-  await page.goto(`${DIBS}/tv`, { waitUntil: "networkidle2", timeout: 30000 });
+  const page = await takeHub();
 
   // Pick the game on the hub the way a person would: click the card that names it.
   const clicked = await page.evaluate((name) => {
@@ -117,8 +161,9 @@ async function start(gameId) {
   const code = page.url().split("/").pop();
   log("hosting", label, "room", code);
 
-  // Video: screencast JPEG frames -> fixed-rate pipe into ffmpeg -> H.264 HLS with 1 s segments.
-  // A silent audio track keeps every player happy.
+  // Video: screencast JPEG frames -> ffmpeg at a fixed rate -> H.264 HLS with 1 s segments. The writer below
+  // keeps the frame count locked to the wall clock, so a busy machine can't make the stream play slower than
+  // real time (which starves the TV's buffer and shows black). A silent audio track keeps every player happy.
   const ffmpeg = spawn(FFMPEG, [
     "-hide_banner", "-loglevel", "error",
     "-f", "image2pipe", "-framerate", String(FPS), "-i", "-",
@@ -128,7 +173,7 @@ async function start(gameId) {
     "-r", String(FPS), "-g", String(FPS), "-keyint_min", String(FPS), "-sc_threshold", "0",
     "-b:v", "5M", "-maxrate", "6M", "-bufsize", "3M",
     "-c:a", "aac", "-b:a", "64k",
-    "-f", "hls", "-hls_time", "1", "-hls_list_size", "6",
+    "-f", "hls", "-hls_time", "1", "-hls_list_size", "8", "-hls_delete_threshold", "8",
     "-hls_flags", "delete_segments+independent_segments+omit_endlist",
     path.join(LIVE, "index.m3u8"),
   ], { stdio: ["pipe", "inherit", "inherit"] });
@@ -136,16 +181,24 @@ async function start(gameId) {
   ffmpeg.stdin.on("error", () => {});
 
   const cdp = await page.createCDPSession();
-  const s = { page, cdp, ffmpeg, frame: null, game: gameId, code, startedAt: Date.now(), frames: 0 };
+  const s = { page, cdp, ffmpeg, frame: null, game: gameId, code, startedAt: Date.now(), frames: 0, written: 0, streamStart: 0, recent: [] };
   cdp.on("Page.screencastFrame", async (f) => {
     s.frame = Buffer.from(f.data, "base64");
     s.frames++;
+    s.recent.push(Date.now());
+    if (s.recent.length > 300) s.recent.shift();
+    if (!s.streamStart) s.streamStart = Date.now();
     try { await cdp.send("Page.screencastFrameAck", { sessionId: f.sessionId }); } catch {}
   });
-  await cdp.send("Page.startScreencast", { format: "jpeg", quality: 82, maxWidth: 1920, maxHeight: 1080, everyNthFrame: 1 });
-  // The screencast only sends frames when something changes; repeat the latest one at a steady rate.
+  await cdp.send("Page.startScreencast", { format: "jpeg", quality: 78, maxWidth: 1920, maxHeight: 1080, everyNthFrame: 1 });
+  // The screencast only sends frames when something changes and slows down when the machine is busy;
+  // feed ffmpeg exactly FPS frames per wall-clock second, repeating the latest one as needed.
   s.timer = setInterval(() => {
-    if (s.frame && !ffmpeg.stdin.destroyed) ffmpeg.stdin.write(s.frame);
+    if (!s.frame || ffmpeg.stdin.destroyed) return;
+    const due = Math.floor(((Date.now() - s.streamStart) / 1000) * FPS);
+    let n = Math.min(due - s.written, FPS); // catch up after a stall, at most a second at a time
+    if (ffmpeg.stdin.writableLength > 32 * 1024 * 1024) n = 0; // encoder can't keep up; don't hoard memory
+    for (; n > 0; n--) { ffmpeg.stdin.write(s.frame); s.written++; }
   }, 1000 / FPS);
   session = s;
   lastHit = Date.now();
@@ -182,6 +235,40 @@ http
         const r = await fetch(`http://${tv}:8060/launch/${app}`, { method: "POST", signal: AbortSignal.timeout(5000) });
         log("launch", app, "on", tv, "->", r.status);
         return json(r.ok ? 200 : 502, { ok: r.ok, status: r.status });
+      }
+      if (url.pathname === "/diag") {
+        const s = session;
+        const d = { version: VERSION, uptime: Math.round(process.uptime()), host: os.hostname(), platform: `${os.type()} ${os.release()} ${os.arch()}`,
+          load: os.loadavg().map((n) => +n.toFixed(2)), chrome: browser?.connected ? await browser.version() : null, hubPreloaded: !!warm, running: !!s };
+        if (s) {
+          const now = Date.now();
+          d.game = s.game; d.code = s.code;
+          d.captureFps = +(s.recent.filter((t) => now - t < 5000).length / 5).toFixed(1);
+          d.streamSeconds = +(s.written / FPS).toFixed(1);
+          d.wallSeconds = s.streamStart ? +((now - s.streamStart) / 1000).toFixed(1) : 0;
+          d.behindSeconds = +(d.wallSeconds - d.streamSeconds).toFixed(1);
+          d.encoderBacklogMB = +(s.ffmpeg.stdin.writableLength / 1048576).toFixed(1);
+          d.segments = fs.readdirSync(LIVE).filter((f) => f.endsWith(".ts")).length;
+          d.webgl = await s.page.evaluate(() => {
+            const gl = document.createElement("canvas").getContext("webgl2");
+            const ext = gl && gl.getExtension("WEBGL_debug_renderer_info");
+            return gl ? (ext ? gl.getParameter(ext.UNMASKED_RENDERER_WEBGL) : "webgl2") : "none";
+          }).catch(() => null);
+        }
+        return json(200, d);
+      }
+      if (url.pathname === "/log") { res.writeHead(200, { "Content-Type": "text/plain" }); return res.end(LOG.join("\n") + "\n"); }
+      if (url.pathname === "/update" && req.method === "POST") {
+        if (session && url.searchParams.get("force") !== "1") return json(409, { ok: false, error: "a room is running" });
+        const src = await (await fetch(`${RAW}/streamer.mjs?t=${Date.now()}`, { signal: AbortSignal.timeout(20000) })).text();
+        if (!src.includes("Dibs TV streamer")) return json(502, { ok: false, error: "download looked wrong" });
+        const me = fileURLToPath(import.meta.url);
+        if (src === fs.readFileSync(me, "utf8")) return json(200, { ok: true, updated: false, version: VERSION });
+        fs.writeFileSync(me, src);
+        log("updated from GitHub; restarting");
+        json(200, { ok: true, updated: true });
+        setTimeout(() => process.exit(0), 300);
+        return;
       }
       if (url.pathname === "/frame.jpg" && session?.frame) { res.writeHead(200, { "Content-Type": "image/jpeg" }); return res.end(session.frame); }
       if (url.pathname.startsWith("/live/")) {
@@ -223,8 +310,10 @@ ssdp.on("message", (msg, rinfo) => {
   ssdp.send(reply, rinfo.port, rinfo.address);
 });
 ssdp.on("error", (e) => log("ssdp:", e.message));
-ssdp.bind(1900, () => {
-  try { ssdp.addMembership("239.255.255.250"); } catch (e) { log("ssdp membership:", e.message); }
-});
+if (process.env.NO_SSDP !== "1") {
+  ssdp.bind(1900, () => {
+    try { ssdp.addMembership("239.255.255.250"); } catch (e) { log("ssdp membership:", e.message); }
+  });
+}
 
 for (const sig of ["SIGINT", "SIGTERM"]) process.on(sig, async () => { await stop(); await browser?.close(); process.exit(0); });

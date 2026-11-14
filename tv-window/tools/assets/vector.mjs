@@ -58,6 +58,7 @@ const KEYS = {
   key_back: `<svg width="24" height="22" viewBox="0 0 24 22"><path d="M9 3L3 9L9 15M3.5 9H15A6 6 0 0 1 15 21H11" fill="none" stroke="#fff" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
   key_lr: `<svg width="34" height="22" viewBox="0 0 34 22"><path d="M10 4L3 11L10 18M24 4L31 11L24 18" fill="none" stroke="#fff" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
   key_down: `<svg width="22" height="16" viewBox="0 0 22 16"><path d="M4 4L11 11L18 4" fill="none" stroke="#fff" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
+  key_rwff: `<svg width="40" height="20" viewBox="0 0 40 20"><path d="M10 3L2 10L10 17ZM18 3L10 10L18 17ZM22 3L30 10L22 17ZM30 3L38 10L30 17Z" fill="#fff"/></svg>`,
   key_updown: `<svg width="22" height="26" viewBox="0 0 22 26"><path d="M5 9L11 3L17 9M5 17L11 23L17 17" fill="none" stroke="#fff" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
 };
 
@@ -115,7 +116,7 @@ export async function renderVector({ IMG, FONTS }) {
     const fonts = fontFace(FONTS, "UIX", "Nunito-Light.ttf") + fontFace(FONTS, "UIR", "Nunito-Regular.ttf") + fontFace(FONTS, "UIM", "Nunito-SemiBold.ttf");
     await page.setViewport({ width: 200, height: 100, deviceScaleFactor: 1 });
     for (const [name, inner] of Object.entries(KEYS)) {
-      const width = { key_ok: 72, key_lr: 76 }[name] ?? 60;
+      const width = { key_ok: 72, key_lr: 76, key_rwff: 84 }[name] ?? 60;
       await page.setContent(`<html><head><style>${fonts}
         body{margin:0;background:transparent}
         #k{box-sizing:border-box;width:${width}px;height:48px;border:2.5px solid rgba(255,255,255,.85);border-radius:12px;
