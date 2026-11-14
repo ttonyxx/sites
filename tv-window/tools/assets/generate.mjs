@@ -57,6 +57,9 @@ alphaMask("glow.png", 512, 512, (x, y) => {
   return clamp((Math.exp(-5 * r * r) - Math.exp(-5)) / (1 - Math.exp(-5)));
 });
 
+// Soft horizontal edge (opaque -> clear), used where the info panel meets the photos.
+alphaMask("fade_h.png", 256, 8, (x) => Math.pow(1 - x / 255, 1.8));
+
 // Legibility scrim: darkens the left (clock) and bottom (forecast) of the screen.
 {
   const w = 960, h = 540, px = new Uint8Array(w * h * 4);
@@ -64,7 +67,8 @@ alphaMask("glow.png", 512, 512, (x, y) => {
     for (let x = 0; x < w; x++) {
       const left = 0.55 * Math.pow(clamp(1 - x / (w * 0.7)), 1.6);
       const bottom = 0.7 * Math.pow(clamp((y / h - 0.42) / 0.58), 1.4);
-      const a = 1 - (1 - left) * (1 - bottom);
+      const top = 0.38 * Math.pow(clamp(1 - y / (h * 0.5)), 1.5);
+      const a = 1 - (1 - left) * (1 - bottom) * (1 - top);
       const i = (y * w + x) * 4;
       px[i] = px[i + 1] = px[i + 2] = 0;
       px[i + 3] = byte(a, x, y);
@@ -184,14 +188,17 @@ ninePatch("focus.9.png", 18, 0.16, 0.7, 2.5); // list focus highlight
 ninePatch("pill.9.png", 22, 1, 0, 0);
 
 // --- Fonts -----------------------------------------------------------------------------
-const INTER = path.join(TOOLS, "node_modules/@expo-google-fonts/inter");
+// Nunito: rounded terminals read as friendly at couch distance.
+const NUNITO = path.join(TOOLS, "node_modules/@expo-google-fonts/nunito");
+for (const f of fs.readdirSync(FONTS)) if (f.endsWith(".ttf")) fs.rmSync(path.join(FONTS, f));
 for (const [src, dst] of [
-  ["200ExtraLight/Inter_200ExtraLight.ttf", "Inter-ExtraLight.ttf"],
-  ["400Regular/Inter_400Regular.ttf", "Inter-Regular.ttf"],
-  ["500Medium/Inter_500Medium.ttf", "Inter-Medium.ttf"],
-]) fs.copyFileSync(path.join(INTER, src), path.join(FONTS, dst));
-fs.copyFileSync(path.join(INTER, "LICENSE_FONT"), path.join(FONTS, "OFL.txt"));
-console.log("  fonts: Inter ExtraLight / Regular / Medium (SIL OFL 1.1)");
+  ["200ExtraLight/Nunito_200ExtraLight.ttf", "Nunito-ExtraLight.ttf"],
+  ["300Light/Nunito_300Light.ttf", "Nunito-Light.ttf"],
+  ["400Regular/Nunito_400Regular.ttf", "Nunito-Regular.ttf"],
+  ["600SemiBold/Nunito_600SemiBold.ttf", "Nunito-SemiBold.ttf"],
+]) fs.copyFileSync(path.join(NUNITO, src), path.join(FONTS, dst));
+fs.copyFileSync(path.join(NUNITO, "LICENSE_FONT"), path.join(FONTS, "OFL.txt"));
+console.log("  fonts: Nunito ExtraLight / Light / Regular / SemiBold (SIL OFL 1.1)");
 
 // --- Vector art via headless Chrome ------------------------------------------------------
 const { renderVector } = await import("./vector.mjs");

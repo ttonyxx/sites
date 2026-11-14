@@ -29,8 +29,6 @@
       </Group>
     </Group>
 
-    <Poster id="scrim" uri="pkg:/images/scrim.png" width="1920" height="1080" />
-
     <Animation id="tween" duration="2" easeFunction="inOutCubic">
       <ColorFieldInterpolator id="iBase" key="[0,1]" fieldToInterp="base.color" />
       <ColorFieldInterpolator id="iTop" key="[0,1]" fieldToInterp="top.blendColor" />

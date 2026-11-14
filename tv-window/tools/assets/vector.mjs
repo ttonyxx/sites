@@ -77,8 +77,8 @@ function posterHtml(w, h, fonts, { wordmark = true, night = false } = {}) {
     .p{position:relative;width:${w}px;height:${h}px;background:${glow},${sky};}
     canvas{position:absolute;inset:0}
     .wm{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;flex-direction:column;
-      color:rgba(255,255,255,.96);font-family:'InterX';font-size:${h * (night ? 0.075 : 0.2)}px;letter-spacing:-0.02em}
-    .wm small{font-family:'InterR';font-size:${h * 0.05}px;letter-spacing:.08em;text-transform:uppercase;opacity:.7;margin-top:${h * 0.02}px}
+      color:rgba(255,255,255,.96);font-family:'UIX';font-size:${h * (night ? 0.075 : 0.2)}px;letter-spacing:-0.02em}
+    .wm small{font-family:'UIR';font-size:${h * 0.05}px;letter-spacing:.08em;text-transform:uppercase;opacity:.7;margin-top:${h * 0.02}px}
     .horizon{position:absolute;left:0;right:0;bottom:${h * 0.18}px;height:1px;background:linear-gradient(90deg,transparent,rgba(255,255,255,.35),transparent)}
   </style></head><body><div class="p"><canvas id="c" width="${w}" height="${h}"></canvas>
     ${night ? "" : '<div class="horizon"></div>'}
@@ -111,14 +111,14 @@ export async function renderVector({ IMG, FONTS }) {
     }
 
     // Remote key caps used in on-screen hints.
-    const fonts = fontFace(FONTS, "InterX", "Inter-ExtraLight.ttf") + fontFace(FONTS, "InterR", "Inter-Regular.ttf") + fontFace(FONTS, "InterM", "Inter-Medium.ttf");
+    const fonts = fontFace(FONTS, "UIX", "Nunito-Light.ttf") + fontFace(FONTS, "UIR", "Nunito-Regular.ttf") + fontFace(FONTS, "UIM", "Nunito-SemiBold.ttf");
     await page.setViewport({ width: 200, height: 100, deviceScaleFactor: 1 });
     for (const [name, inner] of Object.entries(KEYS)) {
       const width = { key_ok: 72, key_lr: 76 }[name] ?? 60;
       await page.setContent(`<html><head><style>${fonts}
         body{margin:0;background:transparent}
         #k{box-sizing:border-box;width:${width}px;height:48px;border:2.5px solid rgba(255,255,255,.85);border-radius:12px;
-           display:flex;align-items:center;justify-content:center;color:#fff;font:20px 'InterM';letter-spacing:.02em}
+           display:flex;align-items:center;justify-content:center;color:#fff;font:20px 'UIM';letter-spacing:.02em}
       </style></head><body><div id="k">${inner}</div></body></html>`);
       await page.evaluate(() => document.fonts.ready);
       const el = await page.$("#k");

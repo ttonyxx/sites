@@ -1,2 +1,3 @@
-# Per-TV settings (e.g. default location). Packaged onto the TV, never committed.
+# Per-home settings and branding (location, logo). Packaged onto the TV, never committed.
 channel/local.json
+channel/local/

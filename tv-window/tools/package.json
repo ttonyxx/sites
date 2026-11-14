@@ -9,10 +9,12 @@
     "package": "node package.mjs",
     "preview": "node preview/serve.mjs",
     "deploy": "node deploy.mjs",
-    "dev": "node deploy.mjs --watch"
+    "dev": "node deploy.mjs --watch",
+    "logo": "node assets/logo.mjs"
   },
   "devDependencies": {
     "@expo-google-fonts/inter": "^0.4.2",
+    "@expo-google-fonts/nunito": "^0.4.2",
     "brighterscript": "^0.73.8",
     "brs-engine": "^2.6.2",
     "brs-scenegraph": "^0.6.2",

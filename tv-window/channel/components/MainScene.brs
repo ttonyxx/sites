@@ -1,51 +1,71 @@
-' Window dashboard: clock, current weather, hourly + 5-day forecast over a live sky.
+' Window dashboard: clock, current weather, hourly + 5-day forecast over a live sky or a photo album.
+'
+' Two layouts:
+'   "full"  - sky background; clock top-left, weather top-right, forecast cards along the bottom.
+'   "panel" - photo background; everything stacked in a solid left panel so text never sits on a photo,
+'             and the photos get the rest of the screen untouched.
 
 sub init()
     m.top.backgroundColor = "0x060A18FF"
     m.top.backgroundUri = ""
     m.LEFT = 128
     m.RIGHT = 1792
+    m.PANEL_W = 680
 
     m.sky = m.top.findNode("sky")
+    m.photos = m.top.findNode("photos")
+    m.scrim = m.top.findNode("scrim")
     m.content = m.top.findNode("content")
+    m.status = m.top.findNode("status")
     m.fades = {}
     m.prefs = LoadPrefs()
+    m.local = LoadLocal()
     m.data = invalid
     m.dataAt = 0
     m.vm = invalid
     m.wxTask = invalid
+    m.albumTask = invalid
     m.failures = 0
     m.timeShift = 0
     m.lastMinute = -1
-    m.skyReady = false
+    m.layoutMode = ""
 
     m.f = {
-        clock: MakeFont("ExtraLight", 250)
-        ampm: MakeFont("Regular", 58)
+        ' full layout
+        clock: MakeFont("ExtraLight", 224)
+        ampm: MakeFont("Regular", 54)
         date: MakeFont("Regular", 46)
-        greeting: MakeFont("Medium", 34)
-        temp: MakeFont("ExtraLight", 168)
-        place: MakeFont("Medium", 34)
-        cond: MakeFont("Medium", 40)
+        greeting: MakeFont("SemiBold", 34)
+        temp: MakeFont("Light", 160)
+        place: MakeFont("SemiBold", 34)
+        cond: MakeFont("SemiBold", 40)
         detail: MakeFont("Regular", 30)
         small: MakeFont("Regular", 26)
-        colHead: MakeFont("Medium", 28)
+        colHead: MakeFont("SemiBold", 28)
         colTemp: MakeFont("Regular", 38)
         colLo: MakeFont("Regular", 30)
-        pop: MakeFont("Medium", 23)
+        pop: MakeFont("SemiBold", 23)
         status: MakeFont("Regular", 23)
         hint: MakeFont("Regular", 26)
+        ' panel layout
+        pClock: MakeFont("ExtraLight", 150)
+        pAmpm: MakeFont("Regular", 40)
+        pDate: MakeFont("Regular", 34)
+        pGreeting: MakeFont("SemiBold", 30)
+        pSection: MakeFont("SemiBold", 22)
+        pTemp: MakeFont("Light", 88)
+        pCond: MakeFont("SemiBold", 28)
+        pDetail: MakeFont("Regular", 24)
+        pSmall: MakeFont("Regular", 22)
+        pColHead: MakeFont("SemiBold", 21)
+        pColTemp: MakeFont("Regular", 26)
+        pColLo: MakeFont("Regular", 22)
+        pPop: MakeFont("SemiBold", 18)
+        pStatus: MakeFont("Regular", 19)
     }
 
-    buildClock()
-    buildNow()
-    buildCards()
     buildHints()
     buildToast()
-
-    m.status = m.top.findNode("status")
-    m.status.font = m.f.status
-    m.status.color = White(0.5)
 
     m.settings = m.top.findNode("settings")
     m.settings.observeField("changed", "onSettingChanged")
@@ -57,9 +77,13 @@ sub init()
     observeTimer("hintTimer", "hideHints", false)
     observeTimer("toastTimer", "hideToast", false)
     observeTimer("driftTimer", "onDrift", false)
+    observeTimer("albumTimer", "loadAlbum", true)
+    observeTimer("travelTimer", "endTimeTravel", false)
 
     loadCachedWeather()
-    applyLayout(false)
+    buildLayout()
+    applyBackground()
+    loadAlbum()
     onTick()
     fetchWeather()
     showHints()
@@ -75,15 +99,59 @@ end sub
 
 ' ---- building the screen ------------------------------------------------------------------
 
-sub buildClock()
+' (Re)builds the clock / weather / forecast nodes for the layout that suits the background.
+sub buildLayout()
+    mode = "full"
+    if BackgroundMode() <> "sky" then mode = "panel"
+    if mode = m.layoutMode then return
+    m.layoutMode = mode
+    for each id in ["panelBg", "header", "clock", "now", "cards"]
+        g = m.top.findNode(id)
+        g.removeChildrenIndex(g.getChildCount(), 0)
+    end for
+    m.fades = {}
+    m.top.findNode("cards").opacity = 1
+
+    if mode = "panel"
+        buildPanel()
+        m.scrim.visible = false
+        m.photos.areaX = m.PANEL_W
+        m.photos.areaW = 1920 - m.PANEL_W
+        m.photos.dim = 0.04
+        m.status.font = m.f.pStatus
+        m.status.color = White(0.42)
+        m.top.findNode("hints").translation = [m.PANEL_W + 64, 990]
+    else
+        buildFull()
+        m.scrim.visible = true
+        m.photos.areaX = 0
+        m.photos.areaW = 1920
+        m.photos.dim = 0.3
+        m.status.font = m.f.status
+        m.status.color = White(0.5)
+        m.top.findNode("hints").translation = [m.LEFT - 24, 970]
+    end if
+
+    m.lastMinute = -1
+    renderWeather()
+    renderClock(ClockNow())
+    applyLayout(false)
+end sub
+
+sub buildFull()
+    if m.local.logo <> invalid
+        h = 176
+        w = h * LogoAspect()
+        AddPoster(m.top.findNode("header"), m.local.logo, (1920 - w) / 2, 44, w, h)
+    end if
+
     g = m.top.findNode("clock")
     m.greeting = AddLabel(g, m.f.greeting, White(0.78), m.LEFT, 104)
     m.time = AddLabel(g, m.f.clock, White(1), m.LEFT - 10, 120)
     m.ampm = AddLabel(g, m.f.ampm, White(0.85), 0, 0)
-    m.date = AddLabel(g, m.f.date, White(0.9), m.LEFT, 408)
-end sub
+    m.date = AddLabel(g, m.f.date, White(0.9), m.LEFT, 392)
+    m.clockGeom = { y: 120, size: 224, ampmSize: 54 }
 
-sub buildNow()
     g = m.top.findNode("now")
     m.place = AddLabel(g, m.f.place, White(0.85), 0, 108)
     m.wxIcon = AddPoster(g, "", 0, 172, 150, 150)
@@ -91,37 +159,79 @@ sub buildNow()
     m.cond = AddLabel(g, m.f.cond, White(0.95), 0, 344)
     m.details = AddLabel(g, m.f.detail, White(0.75), 0, 400)
     m.sun = AddLabel(g, m.f.small, White(0.6), 0, 446)
-end sub
 
-sub buildCards()
     g = m.top.findNode("cards")
-    m.hourly = buildCard(g, m.LEFT, 664, 1004, 8, false)
-    m.daily = buildCard(g, 1172, 664, m.RIGHT - 1172, 5, true)
+    hourlySpec = { h: 292, headY: 50, iconY: 94, iconS: 76, popY: 172, tempY: 202, loY: -1, head: m.f.colHead, temp: m.f.colTemp, lo: m.f.colLo, pop: m.f.pop, bg: "0x0A1226FF", bgA: 0.44, edgeA: 0.16 }
+    dailySpec = { h: 292, headY: 34, iconY: 78, iconS: 76, popY: 156, tempY: 186, loY: 230, head: m.f.colHead, temp: m.f.colTemp, lo: m.f.colLo, pop: m.f.pop, bg: "0x0A1226FF", bgA: 0.44, edgeA: 0.16 }
+    m.hourly = buildCard(g, m.LEFT, 664, 1004, 8, hourlySpec)
+    m.daily = buildCard(g, 1172, 664, m.RIGHT - 1172, 5, dailySpec)
 end sub
 
-' A frosted card with n evenly spaced forecast columns.
-function buildCard(parent as Object, x as Float, y as Float, w as Float, n as Integer, isDaily as Boolean) as Object
+sub buildPanel()
+    W = m.PANEL_W
+    X = 72
+    bg = m.top.findNode("panelBg")
+    r = bg.CreateChild("Rectangle")
+    r.width = W
+    r.height = 1080
+    r.color = "0x0A0F1CFF"
+    r.opacity = 0.94
+    edge = AddPoster(bg, "pkg:/images/fade_h.png", W, 0, 96, 1080)
+    edge.blendColor = "0x0A0F1CFF"
+    edge.opacity = 0.94
+
+    if m.local.logo <> invalid
+        AddPoster(m.top.findNode("header"), m.local.logo, X - 4, 44, 124 * LogoAspect(), 124)
+    end if
+
+    g = m.top.findNode("clock")
+    m.greeting = AddLabel(g, m.f.pGreeting, White(0.72), X, 192)
+    m.time = AddLabel(g, m.f.pClock, White(1), X - 7, 220)
+    m.ampm = AddLabel(g, m.f.pAmpm, White(0.85), 0, 0)
+    m.date = AddLabel(g, m.f.pDate, White(0.9), X, 396)
+    m.clockGeom = { y: 220, size: 150, ampmSize: 40 }
+
+    g = m.top.findNode("now")
+    m.place = AddLabel(g, m.f.pSection, White(0.5), X, 464)
+    m.wxIcon = AddPoster(g, "", X - 4, 510, 84, 84)
+    m.temp = AddLabel(g, m.f.pTemp, White(1), X + 92, 490)
+    m.cond = AddLabel(g, m.f.pCond, White(0.95), 0, 502)
+    m.details = AddLabel(g, m.f.pDetail, White(0.72), 0, 542)
+    m.sun = AddLabel(g, m.f.pSmall, White(0.55), 0, 576)
+
+    g = m.top.findNode("cards")
+    hourlySpec = { h: 140, headY: 16, iconY: 46, iconS: 50, popY: -1, tempY: 98, loY: -1, head: m.f.pColHead, temp: m.f.pColTemp, lo: m.f.pColLo, pop: m.f.pPop, bg: "0xFFFFFFFF", bgA: 0.06, edgeA: 0.1 }
+    dailySpec = { h: 196, headY: 16, iconY: 46, iconS: 50, popY: 158, tempY: 98, loY: 128, head: m.f.pColHead, temp: m.f.pColTemp, lo: m.f.pColLo, pop: m.f.pPop, bg: "0xFFFFFFFF", bgA: 0.06, edgeA: 0.1 }
+    m.hourly = buildCard(g, X - 16, 640, W - 2 * (X - 16), 6, hourlySpec)
+    m.daily = buildCard(g, X - 16, 796, W - 2 * (X - 16), 5, dailySpec)
+end sub
+
+function LogoAspect() as Float
+    if m.local.logoAspect <> invalid then return m.local.logoAspect
+    return 1.0
+end function
+
+' A frosted card with n evenly spaced forecast columns. spec sets the card height, row positions and fonts;
+' a negative row position leaves that row out.
+function buildCard(parent as Object, x as Float, y as Float, w as Float, n as Integer, spec as Object) as Object
     card = parent.CreateChild("Group")
     card.translation = [x, y]
-    h = 292
-    bg = AddPoster(card, "pkg:/images/card.9.png", 0, 0, w, h)
-    bg.blendColor = "0x0A1226FF"
-    bg.opacity = 0.34
-    edge = AddPoster(card, "pkg:/images/card_edge.9.png", 0, 0, w, h)
-    edge.opacity = 0.16
-    pad = 22
+    bg = AddPoster(card, "pkg:/images/card.9.png", 0, 0, w, spec.h)
+    bg.blendColor = spec.bg
+    bg.opacity = spec.bgA
+    edge = AddPoster(card, "pkg:/images/card_edge.9.png", 0, 0, w, spec.h)
+    edge.opacity = spec.edgeA
+    pad = 14
     colW = (w - pad * 2) / n
     cols = []
     for i = 0 to n - 1
         cx = pad + i * colW
         c = {}
-        dy = 0
-        if not isDaily then dy = 16 ' no low-temperature row, so centre the column vertically
-        c.head = AddLabel(card, m.f.colHead, White(0.7), cx, 34 + dy)
-        c.icon = AddPoster(card, "", cx + (colW - 76) / 2, 78 + dy, 76, 76)
-        c.pop = AddLabel(card, m.f.pop, "0x8CCBFFFF", cx, 156 + dy)
-        c.temp = AddLabel(card, m.f.colTemp, White(1), cx, 186 + dy)
-        if isDaily then c.lo = AddLabel(card, m.f.colLo, White(0.55), cx, 230)
+        c.head = AddLabel(card, spec.head, White(0.68), cx, spec.headY)
+        c.icon = AddPoster(card, "", cx + (colW - spec.iconS) / 2, spec.iconY, spec.iconS, spec.iconS)
+        if spec.popY >= 0 then c.pop = AddLabel(card, spec.pop, "0x8CCBFFFF", cx, spec.popY)
+        c.temp = AddLabel(card, spec.temp, White(1), cx, spec.tempY)
+        if spec.loY >= 0 then c.lo = AddLabel(card, spec.lo, White(0.55), cx, spec.loY)
         for each k in ["head", "temp", "lo", "pop"]
             if c[k] <> invalid
                 c[k].width = colW
@@ -135,16 +245,19 @@ end function
 
 sub buildHints()
     g = m.top.findNode("hints")
-    g.translation = [m.LEFT, 982]
+    pill = AddPoster(g, "pkg:/images/pill.9.png", 0, 0, 100, 64)
+    pill.blendColor = "0x0A0F1CFF"
+    pill.opacity = 0.72
     m.hintItems = []
-    x = 0
+    x = 24
     for each item in [["key_star", 60, "Settings"], ["key_ok", 72, "Minimal"], ["key_lr", 76, "Time travel"]]
-        AddPoster(g, "pkg:/images/" + item[0] + ".png", x, 0, item[1] * 0.8, 48 * 0.8)
-        l = AddLabel(g, m.f.hint, White(0.72), x + item[1] * 0.8 + 14, 4)
+        AddPoster(g, "pkg:/images/" + item[0] + ".png", x, 13, item[1] * 0.8, 48 * 0.8)
+        l = AddLabel(g, m.f.hint, White(0.8), x + item[1] * 0.8 + 14, 15)
         l.text = item[2]
         m.hintItems.Push(l)
         x = x + item[1] * 0.8 + 14 + TextWidth(l) + 40
     end for
+    pill.width = x - 16
     m.hintLayout = m.hintItems[1]
 end sub
 
@@ -152,7 +265,7 @@ sub buildToast()
     g = m.top.findNode("toast")
     bg = AddPoster(g, "pkg:/images/pill.9.png", 0, 0, 420, 64)
     bg.blendColor = "0x0A1226FF"
-    bg.opacity = 0.6
+    bg.opacity = 0.72
     m.toastLabel = AddLabel(g, m.f.hint, White(0.95), 0, 16)
     m.toastBg = bg
 end sub
@@ -188,8 +301,9 @@ sub renderClock(now as Integer)
         m.time.text = parts[0]
         m.ampm.text = parts[1]
     end if
-    tw = TextWidth(m.time)
-    m.ampm.translation = [m.time.translation[0] + tw + 14, 120 + (250 - 58) * 0.969]
+    ' Sit AM/PM on the clock's baseline (Nunito's ascent is 1.011 em).
+    cg = m.clockGeom
+    m.ampm.translation = [m.time.translation[0] + TextWidth(m.time) + 12, cg.y + (cg.size - cg.ampmSize) * 1.011]
     m.date.text = WeekdayName(dt, false) + ", " + MonthName(dt) + " " + dt.GetDayOfMonth().ToStr()
 
     h = dt.GetHours()
@@ -272,9 +386,10 @@ end sub
 sub renderWeather()
     m.vm = WeatherModel(m.data, ClockNow(), m.prefs.clock = "24")
     vm = m.vm
+    cards = m.top.findNode("cards")
     if m.prefs.loc = invalid
-        setNow("No city set", "", "", "Choose your city for weather", "Press  *  on your remote for Settings", "")
-        m.top.findNode("cards").visible = false
+        setNow("No city set", "", "", "Choose your city", "Press  *  for Settings", "")
+        cards.visible = false
     else if vm = invalid
         msg = "Loading weather" + Chr(8230)
         subline = ""
@@ -283,32 +398,48 @@ sub renderWeather()
             subline = "Retrying in a few minutes"
         end if
         setNow(m.prefs.loc.name, "", "", msg, subline, "")
-        m.top.findNode("cards").visible = false
+        cards.visible = false
     else
-        setNow(m.prefs.loc.name, vm.temp, vm.icon, vm.label, vm.details, vm.sun)
+        details = vm.details
+        if m.layoutMode = "panel" then details = vm.hilo
+        setNow(m.prefs.loc.name, vm.temp, vm.icon, vm.label, details, vm.sun)
         fillCard(m.hourly, vm.hourly, false)
         fillCard(m.daily, vm.daily, true)
-        m.top.findNode("cards").visible = true
+        cards.visible = true
     end if
     renderStatus()
 end sub
 
 sub setNow(place as String, temp as String, icon as String, cond as String, details as String, sun as String)
+    m.temp.text = temp
+    m.wxIcon.uri = icon
+    m.wxIcon.visible = icon <> ""
+    m.cond.text = cond
+    m.details.text = details
+    m.sun.text = sun
+    if m.layoutMode = "panel"
+        ' Section label, then [icon][temp][condition / hi-lo / sunset] in one row.
+        m.place.text = UCase(place)
+        x = m.temp.translation[0] + TextWidth(m.temp) + 22
+        y = 502
+        if temp = ""
+            x = 72
+            y = 500
+        end if
+        m.cond.translation = [x, y]
+        m.details.translation = [x, y + 40]
+        m.sun.translation = [x, y + 74]
+        return
+    end if
     R = m.RIGHT
     m.place.text = place
     PlaceRight(m.place, R, 108)
-    m.temp.text = temp
     PlaceRight(m.temp, R + 6, 142)
-    m.wxIcon.uri = icon
-    m.wxIcon.visible = icon <> ""
     m.wxIcon.translation = [m.temp.translation[0] - 168, 168]
     condY = 344
     if temp = "" then condY = 170
-    m.cond.text = cond
     PlaceRight(m.cond, R, condY)
-    m.details.text = details
     PlaceRight(m.details, R, condY + 56)
-    m.sun.text = sun
     PlaceRight(m.sun, R, condY + 102)
 end sub
 
@@ -317,21 +448,21 @@ sub fillCard(card as Object, items as Object, isDaily as Boolean)
         c = card.cols[i]
         it = invalid
         if i < items.Count() then it = items[i]
-        if it = invalid
-            c.head.text = "" : c.temp.text = "" : c.pop.text = "" : c.icon.uri = ""
-            if isDaily then c.lo.text = ""
-        else
+        head = "" : temp = "" : lo = "" : pop = "" : icon = ""
+        if it <> invalid
+            icon = it.icon
+            pop = it.pop
             if isDaily
-                c.head.text = it.day
-                c.temp.text = it.hi
-                c.lo.text = it.lo
+                head = it.day : temp = it.hi : lo = it.lo
             else
-                c.head.text = it.time
-                c.temp.text = it.temp
+                head = it.time : temp = it.temp
             end if
-            c.icon.uri = it.icon
-            c.pop.text = it.pop
         end if
+        c.head.text = head
+        c.temp.text = temp
+        c.icon.uri = icon
+        if c.lo <> invalid then c.lo.text = lo
+        if c.pop <> invalid then c.pop.text = pop
     end for
 end sub
 
@@ -350,7 +481,46 @@ sub renderStatus()
     end if
     if m.timeShift <> 0 then s = ""
     m.status.text = s
-    PlaceRight(m.status, m.RIGHT, 988)
+    if m.layoutMode = "panel"
+        m.status.width = 0
+        m.status.translation = [72, 1012]
+    else
+        PlaceRight(m.status, m.RIGHT, 988)
+    end if
+end sub
+
+' ---- photo album ---------------------------------------------------------------------------
+
+sub loadAlbum()
+    if m.local.album = invalid or m.albumTask <> invalid then return
+    m.albumTask = CreateObject("roSGNode", "AlbumTask")
+    m.albumTask.url = m.local.album
+    m.albumTask.observeField("result", "onAlbumResult")
+    m.albumTask.control = "RUN"
+end sub
+
+sub onAlbumResult()
+    r = m.albumTask.result
+    m.albumTask = invalid
+    if r.ok then m.photos.photos = r.photos
+end sub
+
+' Background: "photos" (album rotation), "mix" (album with the live sky every third slot) or "sky".
+' Time travel always shows the sky, since that's what it scrubs through.
+function BackgroundMode() as String
+    bg = m.prefs.bg
+    if bg = ""
+        bg = "sky"
+        if m.local.album <> invalid then bg = "photos"
+    end if
+    if m.local.album = invalid then bg = "sky"
+    return bg
+end function
+
+sub applyBackground()
+    bg = BackgroundMode()
+    m.photos.mix = bg = "mix"
+    m.photos.active = bg <> "sky" and m.timeShift = 0
 end sub
 
 ' ---- layout, hints, toast ---------------------------------------------------------------------
@@ -406,7 +576,11 @@ sub showToast(text as String)
     w = TextWidth(m.toastLabel) + 56
     m.toastBg.width = w
     m.toastLabel.translation = [28, 16]
-    m.top.findNode("toast").translation = [(1920 - w) / 2, 64]
+    if m.layoutMode = "panel"
+        m.top.findNode("toast").translation = [m.PANEL_W + (1920 - m.PANEL_W - w) / 2, 60]
+    else
+        m.top.findNode("toast").translation = [(1920 - w) / 2, 572]
+    end if
     Fade(m.top.findNode("toast"), 1.0, 0.25)
     t = m.top.findNode("toastTimer")
     t.control = "stop"
@@ -421,21 +595,30 @@ end sub
 ' ---- time travel (left / right on the remote) ----------------------------------------------
 
 sub shiftTime(hours as Integer)
+    print "[window] shiftTime "; hours
     if hours = 0 then m.timeShift = 0 else m.timeShift = m.timeShift + hours * 3600
     now = ClockNow()
     m.lastMinute = now \ 60
     renderClock(now)
     renderWeather()
     updateSky(1.2)
+    applyBackground()
     if m.timeShift = 0
         showToast("Back to now")
-        m.top.findNode("toastTimer").control = "start"
     else
         h = m.timeShift \ 3600
         sign = "+"
         if h < 0 then sign = "-"
-        showToast("Time travel  " + sign + Abs(h).ToStr() + "h   " + Chr(183) + "   Back returns to now")
+        showToast("Time travel  " + sign + Abs(h).ToStr() + "h   " + Chr(183) + "   Replay key returns to now")
     end if
+    ' Never leave the TV stuck in the future: snap back after a minute without input.
+    t = m.top.findNode("travelTimer")
+    t.control = "stop"
+    if m.timeShift <> 0 then t.control = "start"
+end sub
+
+sub endTimeTravel()
+    if m.timeShift <> 0 then shiftTime(0)
 end sub
 
 ' ---- screensaver -------------------------------------------------------------------------------
@@ -482,10 +665,14 @@ sub onSettingChanged()
         renderWeather()
     else if key = "layout"
         applyLayout(true)
+    else if key = "bg"
+        buildLayout()
+        applyBackground()
     end if
 end sub
 
 function onKeyEvent(key as String, press as Boolean) as Boolean
+    print "[window] key "; key; " press="; press; " shift="; m.timeShift
     if not press then return false
     if m.top.screensaver then return false
     if key = "options"
