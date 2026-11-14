@@ -117,7 +117,8 @@ function WeatherModel(data as Dynamic, now as Integer, use24h as Boolean) as Dyn
         hourly: []
         daily: []
     }
-    vm.details = "H " + Deg(NumAt(daily.temperature_2m_max, d)) + "   L " + Deg(NumAt(daily.temperature_2m_min, d)) + feels
+    vm.hilo = "H " + Deg(NumAt(daily.temperature_2m_max, d)) + "   L " + Deg(NumAt(daily.temperature_2m_min, d))
+    vm.details = vm.hilo + feels
 
     ' Next sun event.
     nextRise = IntAt(daily.sunrise, d + 1, 0)

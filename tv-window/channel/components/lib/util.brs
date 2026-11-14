@@ -110,7 +110,7 @@ end function
 
 function MakeFont(weight as String, size as Integer) as Object
     f = CreateObject("roSGNode", "Font")
-    f.uri = "pkg:/fonts/Inter-" + weight + ".ttf"
+    f.uri = "pkg:/fonts/Nunito-" + weight + ".ttf"
     f.size = size
     return f
 end function

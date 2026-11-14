@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Full-screen photo rotation. Landscape photos fill the screen; portrait photos are shown in pairs.
+  Set photos ([{url, w, h}] from AlbumTask) and active = true. With mix = true every third slot
+  fades the photos out so the live sky underneath shows through.
+-->
+<component name="Photos" extends="Group">
+  <interface>
+    <field id="photos" type="array" onChange="onPhotos" />
+    <field id="active" type="boolean" value="false" onChange="onActive" />
+    <field id="mix" type="boolean" value="false" />
+    <field id="slideSeconds" type="float" value="30" />
+    <field id="areaX" type="float" value="0" onChange="onArea" />
+    <field id="areaW" type="float" value="1920" onChange="onArea" />
+    <field id="dim" type="float" value="0.3" onChange="onArea" />
+  </interface>
+  <script type="text/brightscript" uri="Photos.brs" />
+  <children>
+    <Group id="layer" opacity="0">
+      <Rectangle width="1920" height="1080" color="0x05070DFF" />
+      <Group id="slideA" opacity="0" scaleRotateCenter="[960,540]" />
+      <Group id="slideB" opacity="0" scaleRotateCenter="[960,540]" />
+      <Rectangle id="dim" width="1920" height="1080" color="0x000000FF" opacity="0.3" />
+    </Group>
+    <Timer id="advance" repeat="false" />
+    <Timer id="loadTimeout" repeat="false" duration="20" />
+    <Animation id="xfade" duration="1.8" easeFunction="inOutQuad">
+      <FloatFieldInterpolator id="xIn" key="[0,1]" keyValue="[0,1]" fieldToInterp="slideA.opacity" />
+      <FloatFieldInterpolator id="xOut" key="[0,1]" keyValue="[1,0]" fieldToInterp="slideB.opacity" />
+    </Animation>
+    <Animation id="layerFade" duration="1.8" easeFunction="inOutQuad">
+      <FloatFieldInterpolator id="layerInterp" key="[0,1]" keyValue="[0,1]" fieldToInterp="layer.opacity" />
+    </Animation>
+    <Animation id="kenA" easeFunction="linear">
+      <Vector2DFieldInterpolator id="kenAScale" key="[0,1]" fieldToInterp="slideA.scale" />
+      <Vector2DFieldInterpolator id="kenAPos" key="[0,1]" fieldToInterp="slideA.translation" />
+    </Animation>
+    <Animation id="kenB" easeFunction="linear">
+      <Vector2DFieldInterpolator id="kenBScale" key="[0,1]" fieldToInterp="slideB.scale" />
+      <Vector2DFieldInterpolator id="kenBPos" key="[0,1]" fieldToInterp="slideB.translation" />
+    </Animation>
+  </children>
+</component>

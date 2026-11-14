@@ -6,21 +6,18 @@ end function
 
 function LoadPrefs() as Object
     sec = PrefsSection()
-    p = { loc: invalid, units: "F", clock: "", layout: "full", api: "https://api.open-meteo.com" }
+    p = { loc: invalid, units: "F", clock: "", layout: "full", bg: "", api: "https://api.open-meteo.com" }
+    if sec.Exists("bg") then p.bg = sec.Read("bg")
     if sec.Exists("api") then p.api = sec.Read("api") ' test hook used by the preview harness
     if sec.Exists("loc")
         p.loc = ParseJson(sec.Read("loc"))
     else
         ' First run: adopt the default from the (gitignored) pkg:/local.json and remember it on the TV.
-        raw = ReadAsciiFile("pkg:/local.json")
-        cfg = invalid
-        if raw <> "" then cfg = ParseJson(raw)
-        if cfg <> invalid
-            if cfg.loc <> invalid
-                p.loc = cfg.loc
-                sec.Write("loc", FormatJson(cfg.loc))
-                sec.Flush()
-            end if
+        cfg = LoadLocal()
+        if cfg.loc <> invalid
+            p.loc = cfg.loc
+            sec.Write("loc", FormatJson(cfg.loc))
+            sec.Flush()
         end if
     end if
     if sec.Exists("units") then p.units = sec.Read("units")
@@ -61,4 +58,16 @@ function LoadWeatherCache(key as String) as Dynamic
     at = 0
     if sec.Exists("wxAt") then at = sec.Read("wxAt").ToInt()
     return { data: data, at: at }
+end function
+
+' Per-home settings and branding from the gitignored pkg:/local.json ({} when absent).
+' Keys: loc {name, region, lat, lon}, title, logo (pkg: uri), logoAspect (width / height),
+'       album (a public Google Photos shared-album link).
+function LoadLocal() as Object
+    ' (roFileSystem isn't allowed on the render thread, so just read; a missing file reads as "".)
+    raw = ReadAsciiFile("pkg:/local.json")
+    if raw = "" then return {}
+    cfg = ParseJson(raw)
+    if cfg = invalid then return {}
+    return cfg
 end function

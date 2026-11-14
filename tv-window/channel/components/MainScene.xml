@@ -10,7 +10,11 @@
   <script type="text/brightscript" uri="lib/prefs.brs" />
   <children>
     <Sky id="sky" />
+    <Photos id="photos" />
+    <Poster id="scrim" uri="pkg:/images/scrim.png" width="1920" height="1080" />
+    <Group id="panelBg" />
     <Group id="content">
+      <Group id="header" />
       <Group id="clock" />
       <Group id="now" />
       <Group id="cards" />
@@ -19,6 +23,7 @@
     <Group id="hints" opacity="0" />
     <Group id="toast" opacity="0" />
     <SettingsPanel id="settings" visible="false" />
+    <DibsPanel id="dibs" visible="false" />
 
     <Timer id="tick" repeat="true" duration="1" />
     <Timer id="refresh" repeat="true" duration="900" />
@@ -26,6 +31,8 @@
     <Timer id="hintTimer" repeat="false" duration="8" />
     <Timer id="toastTimer" repeat="false" duration="2.5" />
     <Timer id="driftTimer" repeat="true" duration="90" />
+    <Timer id="albumTimer" repeat="true" duration="21600" />
+    <Timer id="travelTimer" repeat="false" duration="60" />
 
     <Animation id="drift" duration="30" easeFunction="inOutQuad">
       <Vector2DFieldInterpolator id="driftInterp" key="[0,1]" fieldToInterp="content.translation" />

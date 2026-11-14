@@ -12,7 +12,7 @@ sub init()
     m.dialog = invalid
 
     body = m.top.findNode("body")
-    m.title = AddLabel(body, MakeFont("Medium", 52), White(1), m.X, 104)
+    m.title = AddLabel(body, MakeFont("SemiBold", 52), White(1), m.X, 104)
     m.subtitle = AddLabel(body, MakeFont("Regular", 28), White(0.6), m.X, 176)
 
     rowFont = MakeFont("Regular", 34)
@@ -79,15 +79,27 @@ sub showMain()
     if p.clock = "24" then clock = "24-hour"
     layout = "Full"
     if p.layout = "minimal" then layout = "Minimal"
+    hasAlbum = LoadLocal().album <> invalid
+    bg = p.bg
+    if bg = "" or not hasAlbum
+        bg = "sky"
+        if hasAlbum then bg = "photos"
+    end if
+    bgNames = { photos: "Photos", mix: "Photos + sky", sky: "Sky" }
     m.items = [
         { key: "loc", title: "Location", value: place, desc: "Used for the forecast and for where the sun sits in the sky. Search by city or town name." }
         { key: "units", title: "Temperature", value: units, desc: "Fahrenheit or Celsius." }
         { key: "clock", title: "Clock", value: clock, desc: "12-hour or 24-hour time." }
-        { key: "layout", title: "Layout", value: layout, desc: "Minimal hides the forecast cards so the sky gets the whole screen. You can also press OK on the dashboard to switch." }
+        { key: "layout", title: "Layout", value: layout, desc: "Minimal hides the forecast cards so the background gets the whole screen. You can also press OK on the dashboard to switch." }
         { key: "saver", title: "Screensaver", value: "How to", desc: "To show Window whenever the TV sits idle: Home " + Chr(8250) + " Settings " + Chr(8250) + " Theme " + Chr(8250) + " Screensavers " + Chr(8250) + " Window." }
     ]
+    if hasAlbum
+        m.items.Unshift({ key: "bg", title: "Background", value: bgNames[bg], desc: "Photos rotates through the shared album. Photos + sky mixes in the live sky. Sky shows only the live sky." })
+    end if
     m.title.text = "Settings"
     m.subtitle.text = "Living room"
+    house = LoadLocal().title
+    if house <> invalid then m.subtitle.text = house
     renderRows()
 end sub
 
@@ -175,6 +187,12 @@ sub activate()
         v = "minimal"
         if m.prefs.layout = "minimal" then v = "full"
         setPref("layout", v)
+    else if it.key = "bg"
+        current = it.value
+        v = "photos"
+        if current = "Photos" then v = "mix"
+        if current = "Photos + sky" then v = "sky"
+        setPref("bg", v)
     else if it.key = "result"
         r = m.results[m.focus]
         region = it.value
