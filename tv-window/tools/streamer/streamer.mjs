@@ -73,7 +73,7 @@ try {
   if (orphans.length) console.log(`stopped ${orphans.length} leftover encoder(s)`);
 } catch {}
 const LIVE = fs.mkdtempSync(path.join(os.tmpdir(), "dibs-live-"));
-const VERSION = "2026-11-14.10";
+const VERSION = "2026-11-14.12";
 // Stream size. The page still renders at 1920x1080 (the TV layout Dibs expects); the capture is scaled down.
 // 720p is plenty for Dibs's big type and halves the work per frame on a busy Mac. OUT=1080 for full HD.
 const OUT_H = Number(process.env.OUT || 720);
@@ -472,8 +472,12 @@ const names = (ps) => (ps.length <= 3 ? ps.map((p) => p.name).join(", ") : `${ps
 
 function punchlineScreen(s, room) {
   const base = { game: "Punchline", color: "0xFFD84AFF", code: room.code, join: `https://dibsgames.com/punchline/game/${room.code}`, now: Date.now() };
-  const players = (s.players || []).map((p) => ({ id: p.id, name: p.name, color: avatarColor(p.name), host: p.id === s.hostId, online: p.online !== false, spectator: !!p.spectator, score: p.score || 0 }));
-  const endsAt = s.timeRemaining > 0 ? Date.now() + s.timeRemaining * 1000 : undefined;
+  // The server keeps players in a map (random order); keep join order so avatars don't jump around on the TV.
+  const seen = (room.seen ??= new Map());
+  for (const p of s.players || []) if (!seen.has(p.id)) seen.set(p.id, seen.size);
+  const players = [...(s.players || [])].sort((a, b) => seen.get(a.id) - seen.get(b.id))
+    .map((p) => ({ id: p.id, name: p.name, color: avatarColor(p.name), host: p.id === s.hostId, online: p.online !== false, spectator: !!p.spectator, score: p.score || 0 }));
+  const secs = s.timeRemaining > 0 ? s.timeRemaining : undefined;
   const done = new Set(s.submittedPlayers || []);
   const active = players.filter((p) => !p.spectator && p.online);
   const roster = active.map((p) => ({ name: p.name, color: p.color, done: done.has(p.id) }));
@@ -489,14 +493,16 @@ function punchlineScreen(s, room) {
   if (/_answer$/.test(ph) || ph === "round1_write_question") {
     const heading = { round1_answer: "Write two funny answers", round2_answer: "Answer your friends' prompts", round3_answer: "Everyone answers the same prompt", round1_write_question: "Write a prompt for round 2" }[ph];
     const kicker = ph === "round3_answer" ? "Final round" : ph === "round1_write_question" ? "Round 2 prep" : `Round ${s.round}`;
-    return { ...base, t: "stage", kicker, heading, body: pending.length ? `Still writing: ${names(pending)}` : "Everyone's in! Hang tight.", phones: true, endsAt, players: roster };
+    return { ...base, t: "stage", kicker, heading, body: pending.length ? `Still writing: ${names(pending)}` : "Everyone's in! Hang tight.", phones: true, secs, players: roster };
   }
   if (ph === "round1_vote" || ph === "round2_vote") {
     const vp = (s.votePairs || [])[0];
     if (!vp) return null;
     const voted = done.size, expected = Math.max(s.votersExpected || 0, voted);
-    return { ...base, t: "matchup", kicker: `Vote ${s.currentVoteIndex + 1} of ${s.totalVotePairs}`, prompt: vp.questionText, byline: vp.questionAuthor ? `Written by ${vp.questionAuthor}` : undefined,
-      answers: [{ text: vp.answer1.text }, { text: vp.answer2.text }], endsAt, note: `${voted} of ${expected} votes in` };
+    const byline = vp.questionAuthor ? `Written by ${vp.questionAuthor}` : undefined;
+    (room.bylines ??= {})[vp.questionText] = byline; // results don't carry the author; keep it for the reveal
+    return { ...base, t: "matchup", kicker: `Vote ${s.currentVoteIndex + 1} of ${s.totalVotePairs}`, prompt: vp.questionText, byline,
+      answers: [{ text: vp.answer1.text }, { text: vp.answer2.text }], secs, note: `${voted} of ${expected} votes in` };
   }
   if (ph === "round1_results" || ph === "round2_results") {
     const r = (s.voteResults || [])[s.currentVoteIndex];
@@ -505,15 +511,15 @@ function punchlineScreen(s, room) {
     const a1 = side(r.answer1, r.votersFor1 || [], r.pointsEarned1, r.sweepBonus1), a2 = side(r.answer2, r.votersFor2 || [], r.pointsEarned2, r.sweepBonus2);
     const w = a1.winner ? a1 : a2.winner ? a2 : null;
     const note = w ? `${w.author} takes it!` : (r.votersFor1?.length || r.votersFor2?.length) ? "It's a tie!" : "Nobody voted!";
-    return { ...base, t: "matchup", kicker: `Result ${s.currentVoteIndex + 1} of ${s.totalVotePairs}`, prompt: r.questionText, answers: [a1, a2], reveal: true, endsAt, note };
+    return { ...base, t: "matchup", kicker: `Result ${s.currentVoteIndex + 1} of ${s.totalVotePairs}`, prompt: r.questionText, byline: room.bylines?.[r.questionText], answers: [a1, a2], reveal: true, secs, note };
   }
   if (ph === "round3_vote") {
     const vp = s.votePairs || [];
-    return { ...base, t: "list", kicker: "Final round · Pick your top 3", prompt: vp[0]?.questionText ?? "", items: vp.map((x) => ({ text: x.answer1.text })), endsAt, phones: true,
+    return { ...base, t: "list", kicker: "Final round · Pick your top 3", prompt: vp[0]?.questionText ?? "", items: vp.map((x) => ({ text: x.answer1.text })), secs, phones: true,
       note: pending.length ? `Still picking: ${names(pending)}` : "Everyone's in!" };
   }
   if (ph === "round3_results") {
-    return { ...base, t: "list", kicker: "Final round · Results", prompt: s.round3Prompt ?? "", reveal: true, endsAt,
+    return { ...base, t: "list", kicker: "Final round · Results", prompt: s.round3Prompt ?? "", reveal: true, secs,
       items: (s.round3Results || []).map((x, i) => ({ text: x.answer.text, author: x.answer.playerName, color: avatarColor(x.answer.playerName), points: x.totalPoints, place: i + 1 })) };
   }
   if (ph === "results") {

@@ -56,7 +56,9 @@
     async function run() {
       const resp = await fetch("./app.zip?t=" + Date.now());
       const blob = await resp.arrayBuffer();
-      brs.execute("window.zip", blob, { clearDisplayOnExit: false, entryPoint: params.get("saver") ? false : true });
+      // ?deeplink=dibs=demo  ->  Main(args) gets { dibs: "demo" }
+      const deepLink = new Map((params.get("deeplink") || "").split(",").filter(Boolean).map((kv) => kv.split("=")));
+      brs.execute("window.zip", blob, { clearDisplayOnExit: false, entryPoint: params.get("saver") ? false : true }, deepLink.size ? deepLink : undefined);
     }
 
     (async () => {

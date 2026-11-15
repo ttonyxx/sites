@@ -322,7 +322,7 @@ end function
 
 function DemoScreens() as Object
     dt = CreateObject("roDateTime")
-    now = dt.AsSeconds() * 1000.0
+    now = CDbl(dt.AsSeconds()) * CDbl(1000)
     b = { game: "Punchline", color: "0xFFC93CFF", code: "DEMOAB", join: "https://dibsgames.com/punchline/game/DEMOAB", now: now }
     tony = { name: "Tony", color: "0x2DD4A0FF", host: true }
     maya = { name: "Maya", color: "0xFF7AC6FF" }
@@ -330,10 +330,12 @@ function DemoScreens() as Object
     lee = { name: "Lee", color: "0xFF6B57FF" }
     return [
         With(b, { t: "lobby", players: [tony, maya, sam, lee], max: 16, hint: "Tony starts the game from their phone", settings: "3 rounds" })
-        With(b, { t: "stage", kicker: "Round 1", heading: "Answer your prompts", body: "Two prompts each. Funny beats true.", phones: true, endsAt: now + 75000, players: [With(tony, { done: true }), maya, With(sam, { done: true }), lee] })
-        With(b, { t: "matchup", kicker: "Matchup 1 of 4", prompt: "The worst thing to hear your pilot say", answers: [{ text: "Anyone know where the brakes are?" }, { text: "Hold my coffee" }], endsAt: now + 20000 })
-        With(b, { t: "matchup", kicker: "Matchup 1 of 4", prompt: "The worst thing to hear your pilot say", reveal: true, answers: [{ text: "Anyone know where the brakes are?", author: "Maya", votes: 1, points: 100 }, { text: "Hold my coffee", author: "Sam", votes: 3, points: 300, winner: true }] })
-        With(b, { t: "scores", title: "Scores", rows: [With(sam, { score: 600, delta: 300 }), With(maya, { score: 400, delta: 100 }), With(tony, { score: 300 }), With(lee, { score: 100 })] })
+        With(b, { t: "stage", kicker: "Round 1", heading: "Answer your prompts", body: "Two prompts each. Funny beats true.", phones: true, secs: 75, players: [With(tony, { done: true }), maya, With(sam, { done: true }), lee] })
+        With(b, { t: "matchup", kicker: "Vote 1 of 4", prompt: "The worst thing to hear your pilot say", byline: "Written by Maya", note: "1 of 2 votes in", answers: [{ text: "Anyone know where the brakes are?" }, { text: "Hold my coffee" }], secs: 20 })
+        With(b, { t: "matchup", kicker: "Result 1 of 4", prompt: "The worst thing to hear your pilot say", reveal: true, note: "Sam takes it!", answers: [{ text: "Anyone know where the brakes are?", author: "Maya", votes: 1, points: 100 }, { text: "Hold my coffee", author: "Sam", votes: 3, points: 300, winner: true }] })
+        With(b, { t: "list", kicker: "Final round " + Chr(183) + " Pick your top 3", prompt: "The worst ice cream flavor", phones: true, secs: 90, note: "Still picking: Maya, Lee", items: [{ text: "Toothpaste swirl" }, { text: "Tuesday" }, { text: "Gas station sushi" }, { text: "Wet dog" }] })
+        With(b, { t: "list", kicker: "Final round " + Chr(183) + " Results", prompt: "The worst ice cream flavor", reveal: true, items: [{ text: "Gas station sushi", author: "Lee", color: "0xFF6B57FF", points: 500, place: 1 }, { text: "Toothpaste swirl", author: "Sam", color: "0x47B5FFFF", points: 300, place: 2 }, { text: "Wet dog", author: "Maya", color: "0xFF7AC6FF", points: 200, place: 3 }, { text: "Tuesday", author: "Tony", color: "0x2DD4A0FF", points: 0, place: 4 }] })
+        With(b, { t: "scores", title: "Sam wins!", final: true, note: "Waiting for Tony to start a new game", rows: [With(sam, { score: 900, delta: 300 }), With(maya, { score: 600, delta: 200 }), With(lee, { score: 600, delta: 500 }), With(tony, { score: 300 })] })
     ]
 end function
 
