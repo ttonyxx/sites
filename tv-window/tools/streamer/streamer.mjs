@@ -14,6 +14,7 @@
 //       GET /live/index.m3u8 (+ segments)    GET /frame.jpg (latest frame, for debugging)
 //       GET /diag (health: capture rate, how far the stream is behind real time, GPU)   GET /log
 //       POST /update  re-downloads this file from GitHub and restarts (launchd brings it back up)
+//       GET /qr.png?data=<dibsgames.com link>   GET /tee.png?k=<key>  (images for the native TV screens)
 import http from "node:http";
 import dgram from "node:dgram";
 import fs from "node:fs";
@@ -73,7 +74,7 @@ try {
   if (orphans.length) console.log(`stopped ${orphans.length} leftover encoder(s)`);
 } catch {}
 const LIVE = fs.mkdtempSync(path.join(os.tmpdir(), "dibs-live-"));
-const VERSION = "2026-11-15.2";
+const VERSION = "2026-11-15.3";
 // Stream size. The page still renders at 1920x1080 (the TV layout Dibs expects); the capture is scaled down.
 // 720p is plenty for Dibs's big type and halves the work per frame on a busy Mac. OUT=1080 for full HD.
 const OUT_H = Number(process.env.OUT || 720);
@@ -158,6 +159,127 @@ async function takeHub() {
 }
 setInterval(prewarm, 5 * 60000);
 setTimeout(prewarm, 1000);
+
+// ---- Tee Party shirts ---------------------------------------------------------------------------
+// Roku can't draw pen strokes, so for the native Tee Party screen each shirt (body, drawing, slogan) is
+// painted here in headless Chrome, the way the web game draws it (frontend/src/games/tko/Shirt.tsx), and
+// the TV loads it as an image: GET /tee.png?k=<key>. Keys come from teeImg() as shirts show up in a room.
+const TEE_PX = 560;
+const TEE_INK = "#221836";
+const TEE_INKS = [TEE_INK, "#FFFFFF", "#FF6B57", "#FF9A3C", "#FFC93C", "#A8E05F", "#2FD6A3", "#47B5FF", "#9B6CFF", "#FF78C4", "#8B5A3C", "#FFC9A8"];
+const TEE_PENS = [6, 13, 26];
+const TEE_COLORS = [["#FFFFFF", TEE_INK], ["#2B2340", "#FFFFFF"], ["#FF6B57", TEE_INK], ["#FFC93C", TEE_INK], ["#2FD6A3", TEE_INK], ["#47B5FF", TEE_INK], ["#9B6CFF", "#FFFFFF"], ["#FF78C4", TEE_INK]];
+const TEE_BODY = "M110 26 Q150 62 190 26 L242 40 L292 92 L256 128 L226 108 L228 284 Q150 292 72 284 L74 108 L44 128 L8 92 L58 40 Z";
+const TEE_CSS = `html,body{margin:0;background:transparent}
+.shirt{position:relative;width:${TEE_PX}px;height:${TEE_PX}px;container-type:inline-size}
+.shirt-body{position:absolute;inset:0;width:100%;height:100%;overflow:visible}
+.shirt-print{position:absolute;left:29%;width:42%;top:24%;height:62%;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2cqw}
+.shirt-drawing{flex:1 1 0;min-height:0;width:100%;display:block;overflow:visible}
+.shirt-slogan{flex:none;max-width:100%;margin:0;text-align:center;font-family:'Bricolage Grotesque',ui-rounded,system-ui,sans-serif;font-weight:800;
+  font-size:6.4cqw;line-height:1.02;letter-spacing:-0.01em;overflow-wrap:anywhere}
+.mid{font-size:5.2cqw}.long{font-size:4.3cqw}.solo{font-size:8.4cqw}.solo-long{font-size:6.2cqw}`;
+
+// The web's stroke path (frontend/src/games/tko/stroke.ts): straight runs, each bend rounded by at most 1 unit.
+function teeStrokePath(p) {
+  const xs = [], ys = [];
+  for (let i = 0; i + 1 < p.length; i += 2) {
+    const x = Number(p[i]) || 0, y = Number(p[i + 1]) || 0, last = xs.length - 1;
+    if (last >= 0 && xs[last] === x && ys[last] === y) continue;
+    xs.push(x); ys.push(y);
+  }
+  const n = xs.length, num = (v) => Math.round(v * 10) / 10;
+  if (!n) return "";
+  let d = `M${num(xs[0])} ${num(ys[0])}`;
+  if (n === 1) return `${d}h0.01`;
+  const ux = [], uy = [], len = [];
+  for (let i = 0; i < n - 1; i++) {
+    const dx = xs[i + 1] - xs[i], dy = ys[i + 1] - ys[i], l = Math.hypot(dx, dy);
+    ux.push(dx / l); uy.push(dy / l); len.push(l);
+  }
+  let reached = 0;
+  for (let i = 1; i < n - 1; i++) {
+    const turn = Math.hypot(ux[i] - ux[i - 1], uy[i] - uy[i - 1]);
+    const most = turn > 1e-9 ? 4 / turn : Infinity;
+    const rin = Math.min(len[i - 1] / 2, most), rout = Math.min(len[i] / 2, most);
+    if (len[i - 1] - rin - reached > 0.05) d += `L${num(xs[i] - ux[i - 1] * rin)} ${num(ys[i] - uy[i - 1] * rin)}`;
+    d += `Q${num(xs[i])} ${num(ys[i])} ${num(xs[i] + ux[i] * rout)} ${num(ys[i] + uy[i] * rout)}`;
+    reached = rout;
+  }
+  return `${d}L${num(xs[n - 1])} ${num(ys[n - 1])}`;
+}
+
+const esc = (t) => String(t).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+function teeHtml(sh) {
+  const [fill, text] = TEE_COLORS[sh.color] ?? TEE_COLORS[0];
+  const strokes = sh.drawing?.strokes ?? [];
+  const len = [...(sh.slogan || "")].length;
+  const size = !strokes.length ? (len > 26 ? "solo-long" : "solo") : len > 26 ? "long" : len > 14 ? "mid" : "";
+  const slogan = sh.slogan ? `<p class="shirt-slogan ${size}" style="color:${text}">${esc(sh.slogan)}</p>` : "";
+  const art = strokes.length
+    ? `<svg class="shirt-drawing" viewBox="0 0 400 400">${strokes.map((s) => `<path d="${teeStrokePath(s.p || [])}" stroke="${TEE_INKS[s.c] ?? TEE_INK}" stroke-width="${TEE_PENS[s.w] ?? 13}" fill="none" stroke-linecap="round" stroke-linejoin="round"/>`).join("")}</svg>`
+    : "";
+  return `<div class="shirt" id="tee"><svg class="shirt-body" viewBox="0 0 300 300">
+    <path d="${TEE_BODY}" fill="${fill}" stroke="${TEE_INK}" stroke-width="6" stroke-linejoin="round"/>
+    <path d="M74 108 Q70 200 72 284 Q100 287 118 288 Q96 200 104 112 Z" fill="${TEE_INK}" opacity="0.07"/>
+    <path d="M112 28 Q150 70 188 28" fill="none" stroke="${TEE_INK}" stroke-width="5" stroke-linecap="round" opacity="0.85"/>
+    <path d="M30 116 L64 84 M270 116 L236 84" stroke="${TEE_INK}" stroke-width="3.5" stroke-linecap="round" opacity="0.35"/>
+  </svg><div class="shirt-print">${sh.sloganTop ? slogan : ""}${art}${sh.sloganTop ? "" : slogan}</div></div>`;
+}
+
+let painter = null;
+let paintQueue = Promise.resolve();
+async function getPainter() {
+  if (painter && !painter.isClosed() && browser?.connected) return painter;
+  const b = await getBrowser();
+  const p = await b.newPage();
+  await p.setViewport({ width: TEE_PX, height: TEE_PX, deviceScaleFactor: 1 });
+  const font = "https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,800&display=block";
+  await p.setContent(`<!doctype html><html><head><link rel="stylesheet" href="${font}"><style>${TEE_CSS}</style></head><body><div id="root"></div></body></html>`,
+    { waitUntil: "networkidle0", timeout: 15000 }).catch(() => {}); // no font: a fallback face still reads fine
+  await p.evaluate(() => document.fonts.load('800 40px "Bricolage Grotesque"').catch(() => {}));
+  painter = p;
+  return p;
+}
+// One shirt at a time through the one page.
+function paintTee(shirt) {
+  const job = paintQueue.then(async () => {
+    const t = Date.now();
+    const p = await getPainter();
+    await p.evaluate((html) => { document.getElementById("root").innerHTML = html; return document.fonts.ready.then(() => true); }, teeHtml(shirt));
+    const png = await (await p.$("#tee")).screenshot({ type: "png", omitBackground: true });
+    log(`painted a shirt in ${Date.now() - t} ms (${Math.round(png.length / 1024)} KB)`);
+    return png;
+  });
+  paintQueue = job.catch(() => {});
+  return job;
+}
+// Open the painting page ahead of the first shirt (its first paint waits on the page and the font).
+const warmPainter = () => { paintQueue = paintQueue.then(() => getPainter()).catch(() => {}); };
+
+const tees = new Map(); // key -> { shirt, png: Promise<Buffer> | null }
+// The image path for a shirt, painting it now so it's ready by the time the TV asks.
+function teeImg(sh) {
+  if (!sh) return undefined;
+  const id = JSON.stringify([sh.color, !!sh.sloganTop, sh.slogan || "", (sh.drawing?.strokes || []).map((s) => [s.c, s.w, s.p])]);
+  const key = fnv(id).toString(36) + id.length.toString(36);
+  if (!tees.has(key)) {
+    const e = { shirt: sh, png: null };
+    e.png = paintTee(sh);
+    e.png.catch((err) => { log("shirt paint failed:", err.message); e.png = null; painter = null; });
+    tees.set(key, e);
+    if (tees.size > 150) tees.delete(tees.keys().next().value);
+  }
+  return `/tee.png?k=${key}`;
+}
+
+// Sample shirts for the TV's dibs=demo-tee screens (and a quick check that painting works: /tee.png?k=demo1).
+const teeArc = (cx, cy, r, n = 28, from = 0, to = Math.PI * 2) => Array.from({ length: n + 1 }, (_, i) => { const a = from + ((to - from) * i) / n; return [Math.round(cx + r * Math.cos(a)), Math.round(cy + r * Math.sin(a))]; }).flat();
+const DEMO_TEES = {
+  demo1: { color: 5, slogan: "Hot stuff", drawing: { strokes: [{ c: 4, w: 2, p: teeArc(200, 200, 70) }, ...Array.from({ length: 8 }, (_, i) => { const a = (i * Math.PI) / 4; return { c: 3, w: 1, p: [200 + 110 * Math.cos(a), 200 + 110 * Math.sin(a), 200 + 160 * Math.cos(a), 200 + 160 * Math.sin(a)].map(Math.round) }; }), { c: 0, w: 1, p: teeArc(200, 205, 35, 12, 0.3, Math.PI - 0.3) }, { c: 0, w: 2, p: [175, 180, 175, 182] }, { c: 0, w: 2, p: [225, 180, 225, 182] }] } },
+  demo2: { color: 7, sloganTop: true, slogan: "Purrfect day", drawing: { strokes: [{ c: 0, w: 1, p: [110, 330, 110, 150, 150, 70, 180, 140, 220, 140, 250, 70, 290, 150, 290, 330, 110, 330] }, { c: 0, w: 2, p: [165, 210, 165, 212] }, { c: 0, w: 2, p: [235, 210, 235, 212] }, { c: 0, w: 1, p: [190, 250, 200, 262, 210, 250] }, { c: 0, w: 0, p: [80, 240, 160, 250] }, { c: 0, w: 0, p: [320, 240, 240, 250] }] } },
+  demo3: { color: 1, slogan: "I paused my game to be here" },
+  demo4: { color: 4, slogan: "Peak performance", drawing: { strokes: [{ c: 0, w: 1, p: [30, 330, 150, 110, 210, 220, 260, 150, 370, 330, 30, 330] }, { c: 1, w: 1, p: [118, 170, 150, 110, 182, 170] }, { c: 4, w: 2, p: teeArc(320, 90, 30) }] } },
+};
 
 function clearLive() {
   for (const f of fs.readdirSync(LIVE)) fs.rmSync(path.join(LIVE, f), { force: true });
@@ -355,7 +477,17 @@ http
         if (!/^https:\/\/(www\.)?dibsgames\.com\//.test(data)) return json(400, { error: "bad data" });
         const size = Math.min(1024, Number(url.searchParams.get("size")) || 480);
         const png = await QRCode.toBuffer(data, { type: "png", margin: 1, width: size, errorCorrectionLevel: "M", color: { dark: "#221836", light: "#FFFFFF" } });
-        res.writeHead(200, { "Content-Type": "image/png", "Cache-Control": "max-age=3600" });
+        res.writeHead(200, { "Content-Type": "image/png", "Cache-Control": "max-age=3600", "Access-Control-Allow-Origin": "*" });
+        return res.end(png);
+      }
+      if (url.pathname === "/tee.png") {
+        const k = url.searchParams.get("k") || "";
+        if (DEMO_TEES[k] && !tees.has(k)) tees.set(k, { shirt: DEMO_TEES[k], png: null });
+        const e = tees.get(k);
+        if (!e) return json(404, { error: "no such shirt" });
+        if (!e.png) { e.png = paintTee(e.shirt); e.png.catch(() => { e.png = null; painter = null; }); }
+        const png = await e.png;
+        res.writeHead(200, { "Content-Type": "image/png", "Content-Length": png.length, "Cache-Control": "max-age=86400", "Access-Control-Allow-Origin": "*" });
         return res.end(png);
       }
       if (url.pathname === "/frame.jpg" && session?.frame) { res.writeHead(200, { "Content-Type": "image/jpeg" }); return res.end(session.frame); }
@@ -661,9 +793,82 @@ function piratesScreen(s, room) {
   return null;
 }
 
+// Tee Party (backend/internal/tko PlayerView, as a screen sees it). Everyone draws, writes and designs on their
+// phones; the TV shows who's still working, then the shirt fights (painted above, see teeImg) and the champs.
+function teePartyScreen(s, room) {
+  const base = { game: "Tee Party", color: "0x3ED1C8FF", code: room.code, join: `https://dibsgames.com/tee-party/game/${room.code}`, now: Date.now() };
+  const players = joinOrder(s, room);
+  const host = players.find((p) => p.host);
+  const ph = s.phase;
+  if (ph === "draw" && s.round === 1 && room.phase !== "draw") room.games = (room.games || 0) + 1; // keys stay new after "play again"
+  room.phase = ph;
+  const final = s.round === 3;
+  const round = final ? "Final" : `Round ${s.round}`;
+  const secs = s.timeLeftMs > 0 && s.phaseMs > 0 ? Math.ceil(s.timeLeftMs / 1000) : undefined;
+  const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
+  const credits = (sh) => [sh.designer && `Shirt by ${sh.designer.name}`, sh.artist && `Art by ${sh.artist.name}`, sh.writer && `Words by ${sh.writer.name}`].filter(Boolean);
+  const key = (what) => `${room.code}-${room.games || 0}-${s.round}-${what}`;
+  if (ph === "lobby") {
+    return { ...base, t: "lobby", players: lobbyPlayers(players), max: 8, hint: lobbyHint(players, 3), settings: "Draw pictures, write slogans, mash them into shirts, then vote for the best one" };
+  }
+  if (ph === "draw" || ph === "write" || ph === "design") {
+    const done = new Set(s.done || []);
+    const active = players.filter((p) => !p.spectator && p.online);
+    const pending = active.filter((p) => !done.has(p.id));
+    const heading = ph === "draw" ? (s.round === 1 ? "Draw anything you like" : "Fresh doodles, new shirts") : ph === "write" ? "Write lines worth wearing" : "Make your shirts";
+    const verb = { draw: "drawing", write: "writing", design: "designing" }[ph];
+    return { ...base, t: "stage", kicker: `${round} · ${{ draw: "Draw", write: "Slogans", design: "Design time" }[ph]}`, heading,
+      body: pending.length ? `Still ${verb}: ${names(pending)}` : "Everyone's in! Hang tight.", phones: true, secs,
+      players: active.map((p) => ({ name: p.name, color: p.color, done: done.has(p.id) })) };
+  }
+  if (ph === "vote" || ph === "result") {
+    const mu = s.matchup;
+    const r = ph === "result" ? s.result : null;
+    if (!mu || (ph === "result" && !r)) return null;
+    const i = mu.index || 0, of = Math.max(1, mu.total || 1);
+    const corner = (side, sh) => (final ? (side === "a" ? "Round 1 champ" : "Round 2 champ")
+      : side === "a" ? (sh.wins > 0 ? `Champ · ${plural(sh.wins, "win", "wins")}` : "Red corner") : i === 0 ? "Blue corner" : "Challenger");
+    if (!r) {
+      const want = s.votersExpected || 0;
+      return { ...base, t: "fight", key: key(`fight${i}`), kicker: final ? "Final showdown" : `${round} · Fight ${i + 1} of ${of}`,
+        shirts: ["a", "b"].map((side) => ({ img: teeImg(mu[side]), corner: corner(side, mu[side]) })),
+        callout: final ? "Pick the tee of the night on your phones!" : "Vote for your favorite shirt on your phones!",
+        note: `${s.votesIn || 0} of ${want} ${want === 1 ? "vote" : "votes"} in`, secs };
+    }
+    const tie = r.votesA === r.votesB;
+    const headline = r.votesA + r.votesB === 0 ? "No votes, so the belt stays put." : tie ? "It's a tie, so the belt stays put." : final ? "Knockout! We have a winner."
+      : r.winner === "b" ? "Knockout! New champ!" : i > 0 ? "Knockout! The champ holds the belt." : "Knockout!";
+    const shirts = ["a", "b"].map((side) => {
+      const sh = r[side], won = r.winner === side;
+      const voters = (side === "a" ? r.votersA : r.votersB) || [];
+      return { img: teeImg(sh), corner: corner(side, { ...sh, wins: won && !tie ? sh.wins - 1 : sh.wins }), votes: side === "a" ? r.votesA : r.votesB,
+        voters: voters.map((n) => ({ name: n, color: avatarColor(n) })), won, ko: !tie && !won, badge: won ? (tie ? "Keeps the belt" : "Winner") : undefined, credits: credits(sh) };
+    });
+    return { ...base, t: "fight", key: key(`result${i}`), reveal: true, kicker: final ? "Final · Knockout" : `${round} · Result ${i + 1} of ${of}`, shirts, headline,
+      points: (r.points || []).map((p) => ({ name: p.name, color: avatarColor(p.name), points: p.points })), secs };
+  }
+  if (ph === "champion") {
+    const sh = s.champion;
+    if (!sh) return null;
+    return { ...base, t: "champ", key: key("champ"), kicker: round, title: `Round ${s.round} champ!`, img: teeImg(sh),
+      wins: sh.wins === 0 ? "Last shirt standing" : `${plural(sh.wins, "knockout", "knockouts")} in a row`, credits: credits(sh),
+      note: s.round === 1 ? "Round 2 is next: more drawings, more slogans." : "Next up: the final showdown.", secs };
+  }
+  if (ph === "game_over") {
+    const w = s.winner;
+    const rows = players.filter((p) => !p.spectator).sort((a, b) => b.score - a.score || a.name.localeCompare(b.name)).map((p) => ({ name: p.name, color: p.color, score: p.score }));
+    return { ...base, t: "tees", key: key("over"), kicker: "The tee of the night", img: w ? teeImg(w) : undefined, credits: w ? credits(w) : [],
+      empty: w ? undefined : "No shirts this time! Nobody drew or wrote anything. Next game, get creative.",
+      rows, awards: (s.awards || []).slice(0, 3).map((a) => ({ title: a.title, name: a.player?.name ?? "Someone", color: avatarColor(a.player?.name), detail: a.detail })),
+      note: host ? `Waiting for ${host.name} to start a new game` : undefined };
+  }
+  return null;
+}
+
 const NATIVE = {
   punchline: { name: "Punchline", create: "/api/create-room", ws: "/ws", translate: punchlineScreen },
   imposter: { name: "Imposter", create: "/api/imposter/create-room", ws: "/imposter-ws", translate: imposterScreen },
+  "tee-party": { name: "Tee Party", create: "/api/tko/create-room", ws: "/tko-ws", translate: teePartyScreen },
   pirates: { name: "Pirates", create: "/api/pirates/create-room", ws: "/pirates-ws", translate: piratesScreen },
 };
 // Dibs's game ids (in "switch" messages) -> the ids the TV and this streamer use (also the web paths).
@@ -705,6 +910,7 @@ async function adoptNative(key, code) {
   closeNative();
   await stop();
   nroom = { key, g, code, ws: null, screen: null, attempts: 0, dead: false };
+  if (key === "tee-party") warmPainter();
   connectNative(nroom);
   tvSend({ t: "room", game: key, code });
   log("native", g.name, "room", code);

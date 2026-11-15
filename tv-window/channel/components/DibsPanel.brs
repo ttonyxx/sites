@@ -226,7 +226,7 @@ end sub
 ' The oldest home streamer that can draw everything in NativeGames(). An older one is asked to update itself
 ' from GitHub (it refuses while a room is running).
 function MinStreamer() as String
-    return "2026-11-15.2"
+    return "2026-11-15.3"
 end function
 
 ' "2026-11-15.2" style versions: the date, then the build number.
@@ -265,7 +265,7 @@ sub onStreamerVersion()
 end sub
 
 function NativeGames() as Object
-    return { punchline: true, imposter: true, pirates: true }
+    return { punchline: true, imposter: true, "tee-party": true, pirates: true }
 end function
 
 function BridgeHost() as String
@@ -411,6 +411,7 @@ function DemoScreens(which as String) as Object
     now = CDbl(dt.AsSeconds()) * CDbl(1000)
     if which = "demo-imposter" then return ImposterDemo(now)
     if which = "demo-pirates" then return PiratesDemo(now)
+    if which = "demo-tee" then return TeeDemo(now)
     b = { game: "Punchline", color: "0xFFC93CFF", code: "DEMOAB", join: "https://dibsgames.com/punchline/game/DEMOAB", now: now }
     tony = { name: "Tony", color: "0x2DD4A0FF", host: true }
     maya = { name: "Maya", color: "0xFF7AC6FF" }
@@ -424,6 +425,23 @@ function DemoScreens(which as String) as Object
         With(b, { t: "list", kicker: "Final round " + Chr(183) + " Pick your top 3", prompt: "The worst ice cream flavor", phones: true, secs: 90, note: "Still picking: Maya, Lee", items: [{ text: "Toothpaste swirl" }, { text: "Tuesday" }, { text: "Gas station sushi" }, { text: "Wet dog" }] })
         With(b, { t: "list", kicker: "Final round " + Chr(183) + " Results", prompt: "The worst ice cream flavor", reveal: true, items: [{ text: "Gas station sushi", author: "Lee", color: "0xFF6B57FF", points: 500, place: 1 }, { text: "Toothpaste swirl", author: "Sam", color: "0x47B5FFFF", points: 300, place: 2 }, { text: "Wet dog", author: "Maya", color: "0xFF7AC6FF", points: 200, place: 3 }, { text: "Tuesday", author: "Tony", color: "0x2DD4A0FF", points: 0, place: 4 }] })
         With(b, { t: "scores", title: "Sam wins!", final: true, note: "Waiting for Tony to start a new game", rows: [With(sam, { score: 900, delta: 300 }), With(maya, { score: 600, delta: 200 }), With(lee, { score: 600, delta: 500 }), With(tony, { score: 300 })] })
+    ]
+end function
+
+' Tee Party samples. The shirts are the home streamer's built-in demo shirts (/tee.png?k=demo1..4).
+function TeeDemo(now as Double) as Object
+    b = { game: "Tee Party", color: "0x3ED1C8FF", code: "DEMOTE", join: "https://dibsgames.com/tee-party/game/DEMOTE", now: now }
+    tony = { name: "Tony", color: "0x2DD4A0FF" }
+    maya = { name: "Maya", color: "0xFF7AC6FF" }
+    sam = { name: "Sam", color: "0x47B5FFFF" }
+    lee = { name: "Lee", color: "0xFF6B57FF" }
+    return [
+        With(b, { t: "lobby", players: [With(tony, { host: true }), maya, sam, lee], max: 8, hint: "Tony starts the game from their phone", settings: "Draw pictures, write slogans, mash them into shirts, then vote for the best one" })
+        With(b, { t: "stage", kicker: "Round 1 " + Chr(183) + " Draw", heading: "Draw anything you like", body: "Still drawing: Maya and Lee", phones: true, secs: 87, players: [With(tony, { done: true }), maya, With(sam, { done: true }), lee] })
+        With(b, { t: "fight", key: "demo-f2", kicker: "Round 1 " + Chr(183) + " Fight 2 of 5", shirts: [{ img: "/tee.png?k=demo1", corner: "Champ " + Chr(183) + " 1 win" }, { img: "/tee.png?k=demo2", corner: "Challenger" }], callout: "Vote for your favorite shirt on your phones!", note: "1 of 2 votes in", secs: 21 })
+        With(b, { t: "fight", key: "demo-r2", reveal: true, kicker: "Round 1 " + Chr(183) + " Result 2 of 5", shirts: [{ img: "/tee.png?k=demo1", corner: "Champ " + Chr(183) + " 1 win", votes: 1, voters: [sam], ko: true, credits: ["Shirt by Tony", "Art by Maya", "Words by Lee"] }, { img: "/tee.png?k=demo2", corner: "Challenger", votes: 3, voters: [tony, maya, lee], won: true, badge: "Winner", credits: ["Shirt by Sam", "Art by Lee", "Words by Tony"] }], headline: "Knockout! New champ!", points: [{ name: "Sam", color: sam.color, points: 300 }, { name: "Lee", color: lee.color, points: 150 }, { name: "Tony", color: tony.color, points: 150 }, { name: "Maya", color: maya.color, points: 50 }], secs: 6 })
+        With(b, { t: "champ", key: "demo-c1", kicker: "Round 1", title: "Round 1 champ!", img: "/tee.png?k=demo4", wins: "2 knockouts in a row", credits: ["Shirt by Maya", "Art by Tony", "Words by Sam"], note: "Round 2 is next: more drawings, more slogans.", secs: 8 })
+        With(b, { t: "tees", key: "demo-o1", kicker: "The tee of the night", img: "/tee.png?k=demo3", credits: ["Shirt by Lee", "Words by Maya"], rows: [With(lee, { score: 1650 }), With(maya, { score: 1400 }), With(tony, { score: 1100 }), With(sam, { score: 900 })], awards: [With(tony, { title: "Best artist", name: "Tony", detail: "7 votes for their drawings" }), With(maya, { title: "Best writer", name: "Maya", detail: "9 votes for their slogans" }), With(lee, { title: "Knockout king", name: "Lee", detail: "4 knockouts" })], note: "Waiting for Tony to start a new game" })
     ]
 end function
 

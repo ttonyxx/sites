@@ -98,6 +98,21 @@ export async function renderDibs({ browser, IMG, FONTS, TOOLS }) {
       <div style="font:26px/1.25 Body;margin-top:14px;opacity:.88">${blurb}</div>
       <div style="margin-top:auto;font:700 22px Brico;opacity:.7">${players}</div></div>`);
   }
+  // Tee Party pieces for the native TV screen (DibsNative.brs): the VS burst, the K.O. stamp, the champion's belt,
+  // and a faint shirt shown while a painted one loads (same size and outline as the streamer's /tee.png).
+  await shot("tko_vs.png", 180, 144, `<svg viewBox="-40 -32 80 64" width="180" height="144">
+    <path d="M0 -28 L9 -10 L30 -14 L17 1 L32 15 L10 12 L5 30 L-6 13 L-28 19 L-15 3 L-32 -11 L-10 -10 Z" fill="${YELLOW}" stroke="${INK}" stroke-width="4" stroke-linejoin="round"/>
+    <text y="6" text-anchor="middle" font-family="Brico" font-weight="800" font-size="17" fill="${INK}">VS</text></svg>`);
+  await shot("tko_ko.png", 320, 150, `<div style="width:320px;height:150px;display:grid;place-items:center;font:800 116px/1 Brico;color:${CORAL};
+    -webkit-text-stroke:7px ${INK};paint-order:stroke fill;text-shadow:0 10px 0 ${INK}">K.O.</div>`);
+  await shot("tko_belt.png", 450, 135, `<svg viewBox="0 0 200 60" width="450" height="135">
+    <path d="M6 22 Q100 8 194 22 L194 40 Q100 26 6 40 Z" fill="${YELLOW}" stroke="${INK}" stroke-width="4" stroke-linejoin="round"/>
+    <ellipse cx="100" cy="30" rx="30" ry="22" fill="#FFE38A" stroke="${INK}" stroke-width="4"/>
+    <path d="M86 32 L92 22 L100 30 L108 22 L114 32 L112 38 L88 38 Z" fill="${INK}"/>
+    <circle cx="40" cy="26" r="4" fill="${INK}"/><circle cx="160" cy="26" r="4" fill="${INK}"/></svg>`);
+  await shot("tko_blank.png", 560, 560, `<svg viewBox="0 0 300 300" width="560" height="560">
+    <path d="M110 26 Q150 62 190 26 L242 40 L292 92 L256 128 L226 108 L228 284 Q150 292 72 284 L74 108 L44 128 L8 92 L58 40 Z"
+      fill="rgba(255,255,255,.45)" stroke="rgba(34,24,54,.35)" stroke-width="6" stroke-linejoin="round"/></svg>`);
   // App dock icons: Dibs (the mascot box) and a generic music glyph for music apps.
   await shot("app_dibs.png", 192, 192, MASCOT.replace('width="112" height="112"', 'width="192" height="192"'));
   await shot("app_music.png", 192, 192, `<svg viewBox="0 0 64 64" width="192" height="192"><g fill="none" stroke="#fff" stroke-width="5" stroke-linecap="round">

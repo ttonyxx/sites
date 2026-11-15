@@ -115,7 +115,13 @@ an ECP `launch` (allowed in "Limited" mode). That's how the dock opens Spotify (
 - **Deep link:** `curl -X POST "http://<tv-ip>:8060/launch/dev?dibs=punchline"` starts Window and
   hosts that game right away. This works in the TV's default "Limited" control mode. Game ids:
   `punchline`, `imposter`, `tee-party`, `brawl`, `piggyback`, `pirates`.
-- **Trade-offs:** the TV runs a few seconds behind the phones (HLS buffering), and the stream is
+- **Native screens:** Punchline, Imposter, Tee Party and Pirates skip the video: the streamer joins
+  the room as a seatless screen and sends Window small JSON screens over TCP (port 8791), and Window
+  draws them (about 0.2 s from a tap on a phone to the TV). Tee Party's shirts are painted in the
+  streamer's headless Chrome and served as `/tee.png`. Window asks an older streamer to update itself.
+  `dibs=demo`, `demo-imposter`, `demo-pirates` and `demo-tee` cycle sample screens; adding
+  `,streamer=http://host:port` (or `&streamer=` on the TV) points Play Dibs at a test copy.
+- **Trade-offs:** streamed games run a few seconds behind the phones (HLS buffering), and the stream is
   currently silent (Dibs's TV music isn't captured yet). The machine running the streamer has to
   stay on. Hosting it in the cloud next to the Dibs backend removes that requirement.
 

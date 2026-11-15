@@ -9,6 +9,7 @@
 '             tally: [{name, color, count, imp (bool), voters}], rows: [{name, color, score, delta}], note }
 '           (spins through everyone's faces like a spotlight, once per key, then shows the rest)
 '   message { title, body }
+'   fight / champ / tees  (Tee Party; see the Tee Party section)
 ' dark (bool): light text on a dark background (Imposter).
 
 sub init()
@@ -28,6 +29,10 @@ sub init()
     m.timerGroup = invalid
     m.sea = invalid
     m.flashSeq = -1
+    m.fight = invalid
+    m.fightNote = invalid
+    m.fightCallout = ""
+    m.teeKey = ""
     m.top.findNode("flashTimer").observeField("fire", "onFlashDone")
     m.sig = ""
     m.top.findNode("tick").observeField("fire", "onTick")
@@ -121,6 +126,16 @@ sub onScreen()
         end if
     end if
     m.sea = invalid
+    ' Tee Party re-sends a fight as votes come in: just update the count.
+    if t = "fight" and m.fight <> invalid and not Truthy(s.reveal) and s.key <> invalid and s.code <> invalid
+        if m.fight.key = s.key and m.fight.code = s.code
+            updateFight(s)
+            if s.secs <> invalid and m.timerLabel <> invalid then setSecs(s.secs)
+            return
+        end if
+    end if
+    m.fight = invalid
+    m.fightNote = invalid
     setTheme(Truthy(s.dark))
     if s.color <> invalid then m.top.findNode("bg").color = s.color
     m.spin.control = "stop"
@@ -146,6 +161,12 @@ sub onScreen()
         drawSea(s)
     else if t = "haul"
         drawHaul(s)
+    else if t = "fight"
+        drawFight(s)
+    else if t = "champ"
+        drawChamp(s)
+    else if t = "tees"
+        drawTees(s)
     else
         drawMessage(s)
     end if
@@ -201,11 +222,9 @@ sub drawLobby(s as Object)
         nm = Txt(pc, p.name, DF("Text-Bold", 26), m.INK, cx - 10, cy + 100, 206, "center")
         nm.wrap = false
         if Truthy(p.host)
-            badge = DCard(pc, cx + 136, cy - 16, 64, 34, "0xFFC93CFF")
-            Txt(badge, "HOST", DF("Display-Bold", 18), m.INK, 0, 6, 64, "center")
+            MiniPill(pc, cx + 122, cy - 18, 84, "HOST", "0xFFC93CFF")
         else if Truthy(p.bot)
-            badge = DCard(pc, cx + 136, cy - 16, 64, 34, m.MINT)
-            Txt(badge, "BOT", DF("Display-Bold", 18), m.INK, 0, 6, 64, "center")
+            MiniPill(pc, cx + 122, cy - 18, 84, "BOT", m.MINT)
         end if
     end for
     hint = "Scan the code to join. Whoever gets in first is the host."
@@ -1088,6 +1107,383 @@ sub drawHaul(s as Object)
         ml = Txt(v, line, DF("Text-Bold", 26), m.FG2, 80, 944, 1330, "left")
         ml.wrap = false
     end if
+    if s.note <> invalid then Txt(v, s.note, DF("Display-Bold", 32), m.FG, 80, 994, 1330, "left")
+end sub
+
+' ---- Tee Party -----------------------------------------------------------------------------------
+'   fight { key, kicker, shirts: [a, b], reveal (bool), callout, note, headline, points: [{name, color, points}], secs }
+'           shirt = { img, corner, votes, voters: [{name, color}], won, ko, badge, credits: [lines] } (votes on: reveal)
+'   champ { key, kicker, title, img, wins, credits: [lines], note, secs }
+'   tees  { key, kicker, img, credits: [lines], empty, rows: [{name, color, score}], awards: [{title, name, color, detail}], note }
+' img is a shirt the home streamer painted ("/tee.png?k=..." under base). Each key animates once.
+
+' A painted shirt, over a faint blank one with the same outline that shows until the image arrives.
+function TeeShirt(parent as Object, img as Dynamic, x as Float, y as Float, size as Float) as Object
+    g = parent.CreateChild("Group")
+    g.translation = [x, y]
+    AddPoster(g, "pkg:/images/tko_blank.png", 0, 0, size, size)
+    if img <> invalid and m.top.base <> ""
+        p = AddPoster(g, m.top.base + img, 0, 0, size, size)
+        p.loadWidth = size
+        p.loadHeight = size
+        p.loadDisplayMode = "scaleToFit"
+    end if
+    return g
+end function
+
+' Interpolates node "target" (id.field) through values at the given seconds of anim (which starts at 0).
+sub Keyframes(anim as Object, kind as String, target as String, times as Object, values as Object)
+    it = anim.CreateChild(kind)
+    keys = []
+    for each t in times
+        k = t / anim.duration
+        if k > 1 then k = 1
+        keys.Push(k)
+    end for
+    it.key = keys
+    it.keyValue = values
+    it.fieldToInterp = target
+end sub
+
+function NewAnim(parent as Object, seconds as Float) as Object
+    a = parent.CreateChild("Animation")
+    a.duration = seconds
+    a.easeFunction = "linear"
+    return a
+end function
+
+' Uppercase label on an outlined chip, sized to its text.
+function CornerChip(parent as Object, text as String, cx as Float, y as Float, fill as String, tc as String) as Object
+    font = DF("Display-ExtraBold", 26)
+    probe = Txt(parent, UCase(text), font, tc, 0, 0, 0, "left")
+    probe.wrap = false
+    w = TextWidth(probe) + 52
+    parent.removeChild(probe)
+    chip = DCard(parent, cx - w / 2, y, w, 56, fill)
+    Txt(chip, UCase(text), font, tc, 0, 12, w, "center")
+    return chip
+end function
+
+sub drawFight(s as Object)
+    drawTitle(s)
+    v = m.view
+    reveal = Truthy(s.reveal)
+    key = ""
+    if s.key <> invalid then key = s.key
+    animate = key <> m.teeKey
+    m.teeKey = key
+    if s.kicker <> invalid then Txt(v, UCase(s.kicker), DF("Display-Bold", 34), m.FG2, 560, 150, 800, "center")
+    shirts = []
+    if s.shirts <> invalid then shirts = s.shirts
+    if shirts.Count() < 2 then return
+    W = 660
+    H = 694
+    Y = 206
+    xs = [170, 1090]
+    fills = ["0xFFE3DEFF", "0xDDF1FFFF"]
+    tilt = [-0.026, 0.026]
+    size = 580
+    shirtY = 92
+    if reveal
+        size = 440
+        shirtY = 86
+        H = 676
+    end if
+    nV = 0
+    for each sh in shirts
+        if sh.voters <> invalid then nV = nV + sh.voters.Count()
+    end for
+    knockAt = 0.6 + nV * 0.16
+    anim = invalid
+    if animate
+        if reveal then anim = NewAnim(v, knockAt + 0.7) else anim = NewAnim(v, 1.0)
+    end if
+    voter = 0
+    for i = 0 to 1
+        sh = shirts[i]
+        g = v.CreateChild("Group")
+        g.id = "teeSide" + i.ToStr()
+        g.translation = [xs[i], Y]
+        g.scaleRotateCenter = [W / 2, H / 2]
+        g.rotation = tilt[i]
+        DCard(g, 0, 0, W, H, fills[i])
+        corner = ""
+        if sh.corner <> invalid then corner = sh.corner
+        if i = 0
+            CornerChip(g, corner, W / 2, 22, "0xFF6B57FF", m.WHITE)
+        else
+            CornerChip(g, corner, W / 2, 22, "0x47B5FFFF", m.INK)
+        end if
+        TeeShirt(g, sh.img, (W - size) / 2, shirtY, size)
+        if reveal
+            ' Votes and who cast them, then who made it.
+            votes = 0
+            if sh.votes <> invalid then votes = sh.votes
+            label = votes.ToStr() + " vote"
+            if votes <> 1 then label = label + "s"
+            voters = []
+            if sh.voters <> invalid then voters = sh.voters
+            shown = voters.Count()
+            if shown > 7 then shown = 7
+            probe = Txt(g, label, DF("Display-ExtraBold", 34), m.INK, 0, 0, 0, "left")
+            probe.wrap = false
+            lw = TextWidth(probe)
+            g.removeChild(probe)
+            rowW = lw
+            if shown > 0 then rowW = lw + 20 + 44 + (shown - 1) * 34
+            rx = (W - rowW) / 2
+            Txt(g, label, DF("Display-ExtraBold", 34), m.INK, rx, 538, lw + 10, "left")
+            for j = 0 to shown - 1
+                a = Avatar(g, voters[j], rx + lw + 20 + j * 34, 540, 40)
+                a.id = "teeVoter" + voter.ToStr()
+                if anim <> invalid
+                    a.opacity = 0
+                    t = 0.25 + voter * 0.16
+                    Keyframes(anim, "FloatFieldInterpolator", a.id + ".opacity", [0, t, t + 0.12, anim.duration], [0.0, 0.0, 1.0, 1.0])
+                end if
+                voter = voter + 1
+            end for
+            line = ""
+            if sh.credits <> invalid
+                for each c in sh.credits
+                    if line <> "" then line = line + "   " + Chr(183) + "   "
+                    line = line + c
+                end for
+            end if
+            cl = Txt(g, line, DF("Text-Bold", 25), m.INK, 30, 594, W - 60, "center")
+            cl.maxLines = 2
+            ' The knockout: the loser tips over, the winner gets a badge.
+            if Truthy(sh.ko)
+                ko = AddPoster(g, "pkg:/images/tko_ko.png", (W - 320) / 2, shirtY + size / 2 - 75, 320, 150)
+                ko.id = "teeKO"
+                ko.scaleRotateCenter = [160, 75]
+                ko.rotation = -0.21
+                lostRot = tilt[i] * 3.5
+                if anim <> invalid
+                    ko.opacity = 0
+                    Keyframes(anim, "FloatFieldInterpolator", "teeKO.opacity", [0, knockAt, knockAt + 0.08, anim.duration], [0.0, 0.0, 1.0, 1.0])
+                    Keyframes(anim, "Vector2DFieldInterpolator", "teeKO.scale", [0, knockAt, knockAt + 0.3, anim.duration], [[3.0, 3.0], [3.0, 3.0], [1.0, 1.0], [1.0, 1.0]])
+                    Keyframes(anim, "FloatFieldInterpolator", g.id + ".rotation", [0, knockAt, knockAt + 0.35, anim.duration], [tilt[i], tilt[i], lostRot, lostRot])
+                    Keyframes(anim, "Vector2DFieldInterpolator", g.id + ".translation", [0, knockAt, knockAt + 0.35, anim.duration], [[xs[i], Y], [xs[i], Y], [xs[i], Y + 14], [xs[i], Y + 14]])
+                    Keyframes(anim, "FloatFieldInterpolator", g.id + ".opacity", [0, knockAt, knockAt + 0.35, anim.duration], [1.0, 1.0, 0.55, 0.55])
+                else
+                    g.rotation = lostRot
+                    g.translation = [xs[i], Y + 14]
+                    g.opacity = 0.55
+                end if
+            end if
+            if sh.badge <> invalid
+                badge = CornerChip(g, sh.badge, W - 150, -30, "0xFFC93CFF", m.INK)
+                badge.id = "teeBadge"
+                badge.scaleRotateCenter = [100, 28]
+                if anim <> invalid
+                    badge.opacity = 0
+                    t = knockAt + 0.15
+                    Keyframes(anim, "FloatFieldInterpolator", "teeBadge.opacity", [0, t, t + 0.1, anim.duration], [0.0, 0.0, 1.0, 1.0])
+                    Keyframes(anim, "Vector2DFieldInterpolator", "teeBadge.scale", [0, t, t + 0.18, t + 0.3, anim.duration], [[0.5, 0.5], [0.5, 0.5], [1.15, 1.15], [1.0, 1.0], [1.0, 1.0]])
+                end if
+                if Truthy(sh.won) and anim <> invalid
+                    Keyframes(anim, "Vector2DFieldInterpolator", g.id + ".scale", [0, knockAt, knockAt + 0.2, knockAt + 0.45, anim.duration], [[1.0, 1.0], [1.0, 1.0], [1.06, 1.06], [1.02, 1.02], [1.02, 1.02]])
+                else if Truthy(sh.won)
+                    g.scale = [1.02, 1.02]
+                end if
+            end if
+        else if anim <> invalid
+            ' The fighters slide in from the sides.
+            from = xs[i] - 300
+            if i = 1 then from = xs[i] + 300
+            g.opacity = 0
+            g.translation = [from, Y]
+            t0 = 0.05 + i * 0.2
+            Keyframes(anim, "Vector2DFieldInterpolator", g.id + ".translation", [0, t0, t0 + 0.32, t0 + 0.45, anim.duration], [[from, Y], [from, Y], [xs[i] + (xs[i] - from) * 0.04, Y], [xs[i], Y], [xs[i], Y]])
+            Keyframes(anim, "FloatFieldInterpolator", g.id + ".opacity", [0, t0, t0 + 0.2, anim.duration], [0.0, 0.0, 1.0, 1.0])
+        end if
+    end for
+    if not reveal
+        vs = AddPoster(v, "pkg:/images/tko_vs.png", 960 - 90, 480, 180, 144)
+        vs.id = "teeVS"
+        vs.scaleRotateCenter = [90, 72]
+        if anim <> invalid
+            vs.scale = [0, 0]
+            Keyframes(anim, "Vector2DFieldInterpolator", "teeVS.scale", [0, 0.55, 0.75, 0.88, 1.0], [[0.0, 0.0], [0.0, 0.0], [1.2, 1.2], [0.95, 0.95], [1.0, 1.0]])
+            Keyframes(anim, "FloatFieldInterpolator", "teeVS.rotation", [0, 0.55, 0.8, 1.0], [-0.7, -0.7, 0.05, 0.0])
+        end if
+        line = ""
+        if s.callout <> invalid then line = s.callout
+        note = ""
+        if s.note <> invalid then note = s.note
+        if note <> "" then line = line + "   " + Chr(183) + "   " + note
+        m.fightNote = Txt(v, line, DF("Display-ExtraBold", 38), m.FG, 40, 944, 1370, "center")
+        m.fightCallout = ""
+        if s.callout <> invalid then m.fightCallout = s.callout
+    else
+        verdict = v.CreateChild("Group")
+        verdict.id = "teeVerdict"
+        headline = ""
+        if s.headline <> invalid then headline = s.headline
+        Txt(verdict, headline, DF("Display-ExtraBold", 50), m.FG, 40, 914, 1370, "center")
+        points = []
+        if s.points <> invalid then points = s.points
+        pills = []
+        total = 0
+        for each p in points
+            text = "+" + p.points.ToStr() + "  " + p.name
+            probe = Txt(verdict, text, DF("Display-Bold", 20), m.INK, 0, 0, 0, "left")
+            probe.wrap = false
+            w = TextWidth(probe) + 40
+            verdict.removeChild(probe)
+            pills.Push({ text: text, w: w })
+            total = total + w + 12
+            if pills.Count() >= 6 then exit for
+        end for
+        x = 40 + (1370 - total + 12) / 2
+        for each pl in pills
+            MiniPill(verdict, x, 984, pl.w, pl.text, m.WHITE)
+            x = x + pl.w + 12
+        end for
+        if anim <> invalid
+            verdict.opacity = 0
+            Keyframes(anim, "FloatFieldInterpolator", "teeVerdict.opacity", [0, knockAt, knockAt + 0.25, anim.duration], [0.0, 0.0, 1.0, 1.0])
+        end if
+    end if
+    if anim <> invalid then anim.control = "start"
+    if not reveal and s.code <> invalid then m.fight = { key: key, code: s.code }
+end sub
+
+' Only the vote count changed: rewrite the line under the fight.
+sub updateFight(s as Object)
+    if m.fightNote = invalid then return
+    line = m.fightCallout
+    if s.note <> invalid then line = line + "   " + Chr(183) + "   " + s.note
+    m.fightNote.text = line
+end sub
+
+sub drawChamp(s as Object)
+    drawTitle(s)
+    v = m.view
+    key = ""
+    if s.key <> invalid then key = s.key
+    animate = key <> m.teeKey
+    m.teeKey = key
+    size = 600
+    X = 230
+    Y = 200
+    ' The drop (teeDrop, an offset) and the swing (teeChamp's rotation) are separate nodes.
+    drop = v.CreateChild("Group")
+    drop.id = "teeDrop"
+    g = drop.CreateChild("Group")
+    g.id = "teeChamp"
+    g.translation = [X, Y]
+    g.scaleRotateCenter = [size / 2, size / 2]
+    TeeShirt(g, s.img, 0, 0, size)
+    ' The belt hangs across the hem, like the web's.
+    bw = size * 0.72
+    bh = bw * 135 / 450
+    belt = AddPoster(g, "pkg:/images/tko_belt.png", (size - bw) / 2, size * 1.15 - bh, bw, bh)
+    belt.id = "teeBelt"
+    belt.scaleRotateCenter = [bw / 2, bh / 2]
+    if s.kicker <> invalid then Txt(v, UCase(s.kicker), DF("Display-Bold", 36), m.FG2, 960, 250, 860, "left")
+    title = ""
+    if s.title <> invalid then title = s.title
+    Txt(v, title, DF("Display-ExtraBold", 100), m.FG, 960, 296, 880, "left")
+    if s.wins <> invalid then Txt(v, s.wins, DF("Display-ExtraBold", 48), m.FG, 960, 548, 880, "left")
+    y = 640
+    if s.credits <> invalid
+        for each c in s.credits
+            Txt(v, c, DF("Text-Bold", 36), m.FG, 960, y, 880, "left")
+            y = y + 54
+        end for
+    end if
+    if s.note <> invalid then Txt(v, s.note, DF("Text-Regular", 30), m.FG2, 960, 840, 860, "left")
+    if animate
+        anim = NewAnim(v, 1.3)
+        drop.translation = [0, -900]
+        g.rotation = -0.24
+        belt.scale = [0, 0]
+        Keyframes(anim, "Vector2DFieldInterpolator", "teeDrop.translation", [0, 0.2, 0.62, 0.78, 0.92, 1.3], [[0, -900], [0, -900], [0, 24], [0, -10], [0, 0], [0, 0]])
+        Keyframes(anim, "FloatFieldInterpolator", "teeChamp.rotation", [0, 0.2, 0.7, 1.3], [-0.24, -0.24, 0.0, 0.0])
+        Keyframes(anim, "Vector2DFieldInterpolator", "teeBelt.scale", [0, 0.8, 1.0, 1.12, 1.3], [[0.0, 0.0], [0.0, 0.0], [1.15, 1.15], [0.97, 0.97], [1.0, 1.0]])
+        Keyframes(anim, "FloatFieldInterpolator", "teeBelt.rotation", [0, 0.8, 1.1, 1.3], [0.5, 0.5, 0.0, 0.0])
+        anim.control = "start"
+    end if
+end sub
+
+' Game over: the tee of the night and who made it, the scores, and the awards.
+sub drawTees(s as Object)
+    drawTitle(s)
+    v = m.view
+    key = ""
+    if s.key <> invalid then key = s.key
+    animate = key <> m.teeKey
+    m.teeKey = key
+    if s.img <> invalid
+        if s.kicker <> invalid then Txt(v, UCase(s.kicker), DF("Display-Bold", 34), m.FG, 80, 158, 700, "center")
+        g = v.CreateChild("Group")
+        g.id = "teeWinner"
+        g.translation = [150, 206]
+        g.scaleRotateCenter = [280, 280]
+        TeeShirt(g, s.img, 0, 0, 560)
+        y = 780
+        if s.credits <> invalid
+            for each c in s.credits
+                Txt(v, c, DF("Text-Bold", 32), m.FG, 80, y, 700, "center")
+                y = y + 46
+            end for
+        end if
+        if animate
+            anim = NewAnim(v, 1.0)
+            g.opacity = 0
+            g.scale = [0.3, 0.3]
+            Keyframes(anim, "FloatFieldInterpolator", "teeWinner.opacity", [0, 0.3, 0.5, 1.0], [0.0, 0.0, 1.0, 1.0])
+            Keyframes(anim, "Vector2DFieldInterpolator", "teeWinner.scale", [0, 0.3, 0.72, 0.86, 1.0], [[0.3, 0.3], [0.3, 0.3], [1.06, 1.06], [0.98, 0.98], [1.0, 1.0]])
+            Keyframes(anim, "FloatFieldInterpolator", "teeWinner.rotation", [0, 0.3, 0.8, 1.0], [-0.28, -0.28, 0.0, 0.0])
+            anim.control = "start"
+        end if
+    else
+        card = DCard(v, 80, 300, 700, 360, m.WHITE)
+        empty = "No shirts this time!"
+        if s.empty <> invalid then empty = s.empty
+        el = Txt(card, empty, DF("Display-ExtraBold", 48), m.INK, 50, 0, 600, "center")
+        el.height = 360
+        el.vertAlign = "center"
+    end if
+    ' Scores.
+    Txt(v, "Scores", DF("Display-ExtraBold", 44), m.FG, 840, 150, 600, "left")
+    rows = []
+    if s.rows <> invalid then rows = s.rows
+    for i = 0 to rows.Count() - 1
+        if i >= 8 then exit for
+        r = rows[i]
+        fill = m.WHITE
+        if i = 0 then fill = "0xFFF1B8FF"
+        row = DCard(v, 840, 222 + i * 70, 1020, 58, fill)
+        Txt(row, (i + 1).ToStr(), DF("Display-ExtraBold", 32), m.INK, 10, 9, 50, "center")
+        Avatar(row, r, 70, 7, 44)
+        nm = Txt(row, r.name, DF("Display-Bold", 30), m.INK, 134, 10, 640, "left")
+        nm.wrap = false
+        score = "0"
+        if r.score <> invalid then score = r.score.ToStr()
+        Txt(row, score, DF("Display-ExtraBold", 34), m.INK, 780, 7, 210, "right")
+    end for
+    ' Awards, side by side.
+    awards = []
+    if s.awards <> invalid then awards = s.awards
+    shownRows = rows.Count()
+    if shownRows > 8 then shownRows = 8
+    awardsY = 222 + shownRows * 70 + 30
+    for i = 0 to awards.Count() - 1
+        if i >= 3 then exit for
+        a = awards[i]
+        card = DCard(v, 840 + i * 346, awardsY, 328, 120, m.WHITE)
+        Avatar(card, a, 16, 16, 44)
+        Txt(card, UCase(a.title), DF("Display-Bold", 18), "0x22183699", 74, 14, 240, "left")
+        nm = Txt(card, a.name, DF("Display-Bold", 28), m.INK, 74, 36, 240, "left")
+        nm.wrap = false
+        if a.detail <> invalid
+            d = Txt(card, a.detail, DF("Text-Regular", 20), m.INK, 16, 80, 296, "left")
+            d.wrap = false
+        end if
+    end for
     if s.note <> invalid then Txt(v, s.note, DF("Display-Bold", 32), m.FG, 80, 994, 1330, "left")
 end sub
 

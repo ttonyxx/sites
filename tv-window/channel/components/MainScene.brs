@@ -825,6 +825,13 @@ end sub
 sub onLaunchArgs()
     a = m.top.launchArgs
     if a = invalid or m.top.screensaver then return
+    ' streamer=http://host:port points Play Dibs at another home streamer (a test copy on a laptop, or the preview).
+    if a.streamer <> invalid
+        if Left(a.streamer, 7) = "http://"
+            m.streamer = a.streamer
+            m.dibs.streamer = m.streamer
+        end if
+    end if
     if a.dibs <> invalid
         m.dibs.open = true
         m.dibs.autostart = a.dibs
