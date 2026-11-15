@@ -192,6 +192,27 @@ ninePatch("focus.9.png", 18, 0.16, 0.7, 2.5); // list focus highlight
 ninePatch("pill.9.png", 22, 1, 0, 0);
 ninePatch("ring.9.png", 36, 0, 1, 7); // thick focus ring (Dibs game picker)
 
+// Pirates letter tile for the native Dibs screen: white face (tinted at runtime), ink outline and a hard ink
+// shadow under it, all in one image so a tile is just a Poster and a Label.
+{
+  const S = 64, SH = 6, W = S, H = S + SH, R = 14, STROKE = 4.5;
+  const INK = [0x22, 0x18, 0x36];
+  const px = new Uint8Array(W * H * 4);
+  for (let y = 0; y < H; y++)
+    for (let x = 0; x < W; x++) {
+      const face = clamp(0.5 - roundRectSD(x + 0.5, y + 0.5, S, S, R));
+      const shadow = clamp(0.5 - roundRectSD(x + 0.5, y + 0.5 - SH, S, S, R));
+      const inner = clamp(0.5 - (roundRectSD(x + 0.5, y + 0.5, S, S, R) + STROKE));
+      // Inside the face: white where it's inner, ink on the outline; below it: the shadow in ink.
+      const a = clamp(face + shadow * (1 - face));
+      const white = a > 0 ? inner / a : 0;
+      const i = (y * W + x) * 4;
+      for (let c = 0; c < 3; c++) px[i + c] = Math.round(255 * white + INK[c] * (1 - white));
+      px[i + 3] = Math.round(a * 255);
+    }
+  write("tile.png", W, H, px);
+}
+
 // --- Fonts -----------------------------------------------------------------------------
 // Nunito: rounded terminals read as friendly at couch distance.
 const NUNITO = path.join(TOOLS, "node_modules/@expo-google-fonts/nunito");

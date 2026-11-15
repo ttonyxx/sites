@@ -73,7 +73,7 @@ try {
   if (orphans.length) console.log(`stopped ${orphans.length} leftover encoder(s)`);
 } catch {}
 const LIVE = fs.mkdtempSync(path.join(os.tmpdir(), "dibs-live-"));
-const VERSION = "2026-11-15.1";
+const VERSION = "2026-11-15.2";
 // Stream size. The page still renders at 1920x1080 (the TV layout Dibs expects); the capture is scaled down.
 // 720p is plenty for Dibs's big type and halves the work per frame on a busy Mac. OUT=1080 for full HD.
 const OUT_H = Number(process.env.OUT || 720);
@@ -606,9 +606,65 @@ function imposterScreen(s, room) {
   return null;
 }
 
+// Pirates (backend/internal/pirates PlayerView; everyone gets the same one). Tiles flip every few seconds and
+// everyone races to make and steal words, so this one benefits most from not being video.
+function piratesScreen(s, room) {
+  const base = { game: "Pirates", color: "0x174A72FF", dark: true, code: room.code, join: `https://dibsgames.com/pirates/game/${room.code}`, now: Date.now() };
+  const humans = joinOrder(s, room);
+  const bots = (s.bots || []).map((b) => ({ id: b.id, name: b.name, color: avatarColor(b.name), bot: true, score: b.score || 0, online: true }));
+  const crew = [...humans, ...bots];
+  const nameOf = (id) => crew.find((p) => p.id === id)?.name ?? "Someone";
+  const face = (p) => ({ name: p.name, color: avatarColor(p.name) });
+  const host = humans.find((p) => p.host);
+  const st = s.settings || {};
+  const ph = s.phase;
+  if (ph === "lobby") {
+    const settings = [`Words of ${st.minLength || 3}+ letters`, `${st.bagSize || 144} tiles`, `a flip every ${st.flipSecs || 5}s`, st.strict ? "strict steals" : null].filter(Boolean).join("   ·   ");
+    const hint = humans.length && !bots.length && humans.filter((p) => p.online).length === 1 ? `${host?.name ?? "The host"} can add bots, or start solo` : lobbyHint(humans, 1);
+    return { ...base, t: "lobby", players: [...lobbyPlayers(humans), ...bots.map((b) => ({ name: b.name, color: b.color, bot: true }))], max: s.maxSeats || 8, hint, settings };
+  }
+  if (ph === "playing" || ph === "last_call") {
+    const lastCall = ph === "last_call";
+    const top = Math.max(0, ...crew.map((p) => p.score));
+    const votes = new Set((lastCall ? s.doneVotes : s.flipVotes) || []);
+    const byOwner = {};
+    for (const w of s.words || []) (byOwner[w.owner] ??= []).push(w.word);
+    // What happened, like the web feed ("Ana turned Ben's TEAM into STEAM").
+    const describe = (e) => {
+      const took = e.took || [];
+      const whose = (t) => (t.owner === e.by ? `their ${t.word}` : `${nameOf(t.owner)}'s ${t.word}`);
+      if (!took.length) return `grabbed ${e.word}`;
+      if (took.length === 1) return `${took[0].owner === e.by ? "stretched" : "turned"} ${whose(took[0])} into ${e.word}`;
+      const parts = took.map(whose);
+      return `merged ${parts.slice(0, -1).join(", ")} and ${parts.at(-1)} into ${e.word}`;
+    };
+    const pool = s.pool || [];
+    const secs = lastCall ? Math.ceil((s.lastCallMs || 0) / 1000) : s.flipMs > 0 && s.bagLeft > 0 && !s.paused ? Math.max(1, Math.ceil((s.nextFlipMs || 0) / 1000)) : undefined;
+    const voters = humans.filter((p) => p.online).length;
+    return { ...base, t: "sea", kicker: lastCall ? "Last call" : "Grab and steal", lastCall, paused: !!s.paused,
+      pool: pool.map((t) => t.l).join(""), fresh: pool.findIndex((t) => t.id === s.lastFlip), bagLeft: s.bagLeft || 0, flips: s.flips || 0,
+      votes: voters > 1 ? `${votes.size}/${voters} ${lastCall ? "done" : "want the next tile"}` : undefined, secs,
+      holds: crew.map((p) => ({ ...face(p), score: p.score, bot: !!p.bot, away: !p.online, lead: top > 0 && p.score === top, voted: !p.bot && votes.has(p.id), words: byOwner[p.id] || [] })),
+      voteLabel: lastCall ? "DONE" : "FLIP",
+      feed: (s.log || []).slice(-4).reverse().map((e) => ({ seq: e.seq, ...face({ name: nameOf(e.by) }), text: describe(e), word: e.word, steal: (e.took || []).some((t) => t.owner !== e.by) })) };
+  }
+  if (ph === "game_over") {
+    const r = s.results || {};
+    const rows = (r.standings || []).map((x) => ({ ...face(x), score: x.score, bot: !!x.bot, words: x.words || [], stats: `${x.stats?.words ?? 0} made · ${x.stats?.steals ?? 0} stolen · ${x.stats?.robbed ?? 0} lost` }));
+    const champs = rows[0]?.score > 0 ? rows.filter((x) => x.score === rows[0].score) : [];
+    return { ...base, t: "haul", champs: champs.map(face), eyebrow: champs.length > 1 ? "Shared treasure" : "Captain of the seas",
+      title: champs.length ? champs.map((c) => c.name).join(" & ") : "Nobody made a word!", points: champs.length ? `${rows[0].score} ${rows[0].score === 1 ? "point" : "points"} of loot` : undefined,
+      rows, awards: (r.awards || []).slice(0, 4).map((a) => ({ ...face(a), title: a.title, detail: a.detail })),
+      missed: r.missed ? r.missed.slice(0, 6).map((m) => m.word) : undefined,
+      note: host ? `Waiting for ${host.name} to play again` : undefined };
+  }
+  return null;
+}
+
 const NATIVE = {
   punchline: { name: "Punchline", create: "/api/create-room", ws: "/ws", translate: punchlineScreen },
   imposter: { name: "Imposter", create: "/api/imposter/create-room", ws: "/imposter-ws", translate: imposterScreen },
+  pirates: { name: "Pirates", create: "/api/pirates/create-room", ws: "/pirates-ws", translate: piratesScreen },
 };
 // Dibs's game ids (in "switch" messages) -> the ids the TV and this streamer use (also the web paths).
 const KEY_FOR_GAME = { quiplash: "punchline", imposter: "imposter", tko: "tee-party", brawl: "brawl", piggyback: "piggyback", pirates: "pirates" };
@@ -686,7 +742,12 @@ function connectNative(room) {
     try { msg = JSON.parse(buf.toString()); } catch { return; }
     if (msg.type === "game_state") {
       const screen = room.g.translate(msg.payload, room);
-      if (screen && nroom === room) { room.screen = screen; tvSend(screen); }
+      if (!screen || nroom !== room) return;
+      room.screen = screen;
+      // Only send what the TV would draw differently (states also arrive for changes the TV doesn't show).
+      const { now, ...rest } = screen;
+      const sig = JSON.stringify(rest);
+      if (sig !== room.sentSig) { room.sentSig = sig; tvSend(screen); }
     } else if (msg.type === "switch") {
       room.dead = true;
       try { ws.close(); } catch {}

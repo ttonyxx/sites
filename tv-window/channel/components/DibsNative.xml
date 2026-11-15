@@ -20,5 +20,6 @@
     <Group id="chip" visible="false" />
     <Timer id="tick" duration="0.25" repeat="true" />
     <Timer id="spin" duration="0.5" repeat="false" />
+    <Timer id="flashTimer" duration="2.6" repeat="false" />
   </children>
 </component>

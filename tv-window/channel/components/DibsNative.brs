@@ -25,6 +25,10 @@ sub init()
     m.secs = 0
     m.since = CreateObject("roTimespan")
     m.timerLabel = invalid
+    m.timerGroup = invalid
+    m.sea = invalid
+    m.flashSeq = -1
+    m.top.findNode("flashTimer").observeField("fire", "onFlashDone")
     m.sig = ""
     m.top.findNode("tick").observeField("fire", "onTick")
     m.top.findNode("tick").control = "start"
@@ -108,13 +112,22 @@ sub onScreen()
         return
     end if
     m.sig = sig
+    t = s.t
+    ' Pirates changes every second or so: redraw only the parts of the sea that changed.
+    if t = "sea" and m.sea <> invalid
+        if m.sea.code = s.code
+            updateSea(s)
+            return
+        end if
+    end if
+    m.sea = invalid
     setTheme(Truthy(s.dark))
     if s.color <> invalid then m.top.findNode("bg").color = s.color
     m.spin.control = "stop"
     m.view.removeChildrenIndex(m.view.getChildCount(), 0)
     m.timerLabel = invalid
+    m.timerGroup = invalid
     m.secs = 0
-    t = s.t
     if t = "lobby"
         drawLobby(s)
     else if t = "stage"
@@ -129,11 +142,15 @@ sub onScreen()
         drawTurns(s)
     else if t = "unmask"
         drawUnmask(s)
+    else if t = "sea"
+        drawSea(s)
+    else if t = "haul"
+        drawHaul(s)
     else
         drawMessage(s)
     end if
     drawChip(s, t <> "lobby" and s.code <> invalid)
-    if s.secs <> invalid then drawTimer(s.secs)
+    if s.secs <> invalid and t <> "sea" then drawTimer(s.secs)
 end sub
 
 sub drawTitle(s as Object)
@@ -186,6 +203,9 @@ sub drawLobby(s as Object)
         if Truthy(p.host)
             badge = DCard(pc, cx + 136, cy - 16, 64, 34, "0xFFC93CFF")
             Txt(badge, "HOST", DF("Display-Bold", 18), m.INK, 0, 6, 64, "center")
+        else if Truthy(p.bot)
+            badge = DCard(pc, cx + 136, cy - 16, 64, 34, m.MINT)
+            Txt(badge, "BOT", DF("Display-Bold", 18), m.INK, 0, 6, 64, "center")
         end if
     end for
     hint = "Scan the code to join. Whoever gets in first is the host."
@@ -661,6 +681,416 @@ sub drawRoundScores(parent as Object, s as Object)
     end for
 end sub
 
+' ---- Pirates ------------------------------------------------------------------------------------
+'   sea  { kicker, lastCall, paused, pool (letters in flip order), fresh (index of the newest tile), bagLeft, flips,
+'          votes, secs, voteLabel, holds: [{name, color, score, bot, away, lead, voted, words: []}],
+'          feed: [{seq, name, color, text, word, steal}] (newest first) }
+'   haul { champs: [{name, color}], eyebrow, title, points, rows: [{name, color, score, bot, words, stats}],
+'          awards: [{name, color, title, detail}], missed: [words], note }
+
+' A small rounded label (pill.9.png is a perfect pill at 44 px tall).
+function MiniPill(parent as Object, x as Float, y as Float, w as Float, text as String, fill as String) as Object
+    g = parent.CreateChild("Group")
+    g.translation = [x, y]
+    p = AddPoster(g, "pkg:/images/pill.9.png", 0, 0, w, 44)
+    p.blendColor = fill
+    Txt(g, text, DF("Display-Bold", 20), m.INK, 0, 10, w, "center")
+    return g
+end function
+
+' One letter tile: a pre-drawn tile image (outline and shadow included) and its letter.
+sub LetterTile(parent as Object, l as String, x as Float, y as Float, size as Float, fill as String)
+    p = AddPoster(parent, "pkg:/images/tile.png", x, y, size, size * 70 / 64)
+    p.blendColor = fill
+    t = parent.CreateChild("Label")
+    t.font = DF("Display-ExtraBold", Cint(size * 0.6))
+    t.color = m.INK
+    t.translation = [x, y + size * 0.13]
+    t.width = size
+    t.horizAlign = "center"
+    t.text = l
+end sub
+
+' Width of a word drawn as tiles.
+function WordWidth(word as String, size as Float) as Float
+    return Len(word) * (size + size * 0.1) - size * 0.1
+end function
+
+sub drawSea(s as Object)
+    drawTitle(s)
+    v = m.view
+    m.sea = { code: s.code, sigs: {} }
+    for each k in ["phase", "holds", "flags", "pool", "status", "feed"]
+        m.sea[k] = v.CreateChild("Group")
+    end for
+    m.sea.flash = v.CreateChild("Group")
+    ' Old steals aren't news: only flash ones that happen from here on.
+    m.flashSeq = -1
+    if s.feed <> invalid and s.feed.Count() > 0 then m.flashSeq = s.feed[0].seq
+    updateSea(s)
+end sub
+
+' The cards without the vote flags (those flip every second; the cards only change on a claim).
+function HoldsSig(holds as Dynamic) as Object
+    out = []
+    if holds = invalid then return out
+    for each h in holds
+        c = {}
+        c.Append(h)
+        c.Delete("voted")
+        out.Push(c)
+    end for
+    return out
+end function
+
+' Redraw each part only when what it shows changed.
+sub updateSea(s as Object)
+    parts = {
+        phase: [s.kicker, s.lastCall]
+        holds: HoldsSig(s.holds)
+        flags: [s.holds, s.voteLabel]
+        pool: [s.pool, s.fresh, s.flips]
+        status: [s.bagLeft, s.votes, s.lastCall, s.paused]
+        feed: s.feed
+    }
+    for each k in parts
+        sig = FormatJson(parts[k])
+        if m.sea.sigs[k] <> sig
+            m.sea.sigs[k] = sig
+            g = m.sea[k]
+            g.removeChildrenIndex(g.getChildCount(), 0)
+            if k = "phase" then drawSeaPhase(g, s)
+            if k = "holds" then drawHolds(g, s)
+            if k = "flags" then drawVoteFlags(g, s)
+            if k = "pool" then drawPool(g, s)
+            if k = "status" then drawSeaStatus(g, s)
+            if k = "feed" then drawFeed(g, s)
+        end if
+    end for
+    ' Clock: the next flip, or the end of last call.
+    if s.secs <> invalid
+        if m.timerGroup = invalid
+            drawTimer(s.secs)
+        else
+            m.timerGroup.visible = true
+            setSecs(s.secs)
+        end if
+    else if m.timerGroup <> invalid
+        m.timerGroup.visible = false
+    end if
+    ' A steal gets a banner.
+    if s.feed <> invalid and s.feed.Count() > 0
+        e = s.feed[0]
+        if e.seq > m.flashSeq
+            m.flashSeq = e.seq
+            if Truthy(e.steal) then showFlash(e)
+        end if
+    end if
+end sub
+
+sub drawSeaPhase(g as Object, s as Object)
+    text = "GRAB AND STEAL"
+    if s.kicker <> invalid then text = UCase(s.kicker)
+    fill = m.WHITE
+    tc = m.INK
+    if Truthy(s.lastCall)
+        fill = m.RED
+        tc = m.WHITE
+    end if
+    pill = DCard(g, 600, 66, 380, 66, fill)
+    Txt(pill, text, DF("Display-ExtraBold", 32), tc, 0, 13, 380, "center")
+end sub
+
+' Where each pirate's card goes (the same for the cards and the vote badges drawn over them).
+function HoldLayout(n as Integer) as Object
+    L = { cols: 1, gap: 18 }
+    if n > 4 then L.cols = 2
+    L.rows = (n + L.cols - 1) \ L.cols
+    L.w = (940 - (L.cols - 1) * L.gap) / L.cols
+    L.h = Int((870 - (L.rows - 1) * L.gap) / L.rows)
+    if L.h > 300 then L.h = 300
+    L.tile = 34
+    if L.cols = 2 or L.rows > 3 then L.tile = 28
+    return L
+end function
+
+function HoldPos(i as Integer, L as Object) as Object
+    return [60 + (i mod L.cols) * (L.w + L.gap), 172 + (i \ L.cols) * (L.h + L.gap)]
+end function
+
+' "FLIP" / "DONE" badges: they change all the time, so they live in their own layer over the cards.
+sub drawVoteFlags(g as Object, s as Object)
+    holds = []
+    if s.holds <> invalid then holds = s.holds
+    L = HoldLayout(holds.Count())
+    vt = "FLIP"
+    if s.voteLabel <> invalid then vt = s.voteLabel
+    for i = 0 to holds.Count() - 1
+        if Truthy(holds[i].voted)
+            xy = HoldPos(i, L)
+            MiniPill(g, xy[0] + L.w - 170, xy[1] + 14, 74, vt, m.MINT)
+        end if
+    end for
+end sub
+
+sub drawHolds(g as Object, s as Object)
+    holds = []
+    if s.holds <> invalid then holds = s.holds
+    n = holds.Count()
+    if n = 0 then return
+    L = HoldLayout(n)
+    w = L.w
+    h = L.h
+    tile = L.tile
+    for i = 0 to n - 1
+        p = holds[i]
+        xy = HoldPos(i, L)
+        card = DCard(g, xy[0], xy[1], w, h, m.WHITE)
+        if Truthy(p.away) then card.opacity = 0.6
+        Avatar(card, p, 16, 14, 44)
+        ' Right to left: score, the vote badge's slot (drawn by drawVoteFlags), BOT, TOP.
+        bx = w - 176
+        if Truthy(p.bot)
+            MiniPill(card, bx - 62, 14, 56, "BOT", "0xE9E4F2FF")
+            bx = bx - 62
+        end if
+        if Truthy(p.lead)
+            MiniPill(card, bx - 62, 14, 56, "TOP", "0xFFC93CFF")
+            bx = bx - 62
+        end if
+        nm = Txt(card, p.name, DF("Display-Bold", 30), m.INK, 72, 16, bx - 80, "left")
+        nm.wrap = false
+        score = "0"
+        if p.score <> invalid then score = p.score.ToStr()
+        Txt(card, score, DF("Display-ExtraBold", 40), m.INK, w - 100, 12, 80, "right")
+        ' Their words, as tiles, wrapping; whatever doesn't fit becomes "+N more".
+        words = []
+        if p.words <> invalid then words = p.words
+        if words.Count() = 0
+            Txt(card, "No words yet", DF("Text-Regular", 24), "0x22183680", 20, 76, w - 40, "left")
+        else
+            wx = 18
+            wy = 74
+            rowStep = tile * 1.09 + 10
+            placed = [] ' { g, x, y } per word drawn, so the last one can make room for "+N more"
+            for each word in words
+                ww = WordWidth(word, tile)
+                if wx + ww > w - 18 and wx > 18
+                    wx = 18
+                    wy = wy + rowStep
+                end if
+                if wy + rowStep > h - 6 then exit for
+                wg = card.CreateChild("Group")
+                for c = 0 to Len(word) - 1
+                    LetterTile(wg, Mid(word, c + 1, 1), wx + c * tile * 1.1, wy, tile, "0xFFF3D6FF")
+                end for
+                placed.Push({ g: wg, x: wx, y: wy, endX: wx + ww })
+                wx = wx + ww + tile * 0.6
+            end for
+            if placed.Count() < words.Count()
+                ' Put "+N more" after the last word, giving up that word if there isn't room.
+                lastW = placed[placed.Count() - 1]
+                x = lastW.endX + tile * 0.6
+                if x + 110 > w - 18 and placed.Count() > 1
+                    card.removeChild(lastW.g)
+                    placed.Pop()
+                    x = lastW.x
+                end if
+                more = Txt(card, "+" + (words.Count() - placed.Count()).ToStr() + " more", DF("Text-Bold", 22), "0x22183699", x, lastW.y + tile * 0.12, 120, "left")
+                more.wrap = false
+            end if
+        end if
+    end for
+end sub
+
+sub drawPool(g as Object, s as Object)
+    card = DCard(g, 1040, 172, 820, 528, "0xF6DCA2FF")
+    pool = ""
+    if s.pool <> invalid then pool = s.pool
+    n = Len(pool)
+    Txt(card, "The pool", DF("Display-Bold", 36), m.INK, 30, 20, 400, "left")
+    Txt(card, n.ToStr(), DF("Display-Bold", 36), "0x22183680", 200, 20, 200, "left")
+    if n = 0
+        msg = "Tiles flip here"
+        if s.flips <> invalid and s.flips > 0 then msg = "Empty! Every tile is in a word."
+        Txt(card, msg, DF("Text-Regular", 32), "0x22183699", 0, 240, 820, "center")
+        return
+    end if
+    ' The biggest tiles that fit the box.
+    areaW = 760
+    areaH = 410
+    size = 28
+    for each sz in [76, 66, 58, 50, 44, 38, 33, 28]
+        gap = sz * 0.16
+        cols = Int((areaW + gap) / (sz + gap))
+        rows = (n + cols - 1) \ cols
+        if rows * (sz * 1.09 + gap) <= areaH
+            size = sz
+            exit for
+        end if
+    end for
+    gap = size * 0.16
+    cols = Int((areaW + gap) / (size + gap))
+    fresh = -1
+    if s.fresh <> invalid then fresh = s.fresh
+    for i = 0 to n - 1
+        fill = "0xFFF3D6FF"
+        if i = fresh then fill = "0xFFC93CFF"
+        LetterTile(card, Mid(pool, i + 1, 1), 30 + (i mod cols) * (size + gap), 86 + (i \ cols) * (size * 1.09 + gap), size, fill)
+    end for
+end sub
+
+sub drawSeaStatus(g as Object, s as Object)
+    left = 0
+    if s.bagLeft <> invalid then left = s.bagLeft
+    if Truthy(s.lastCall)
+        Txt(g, "Bag's empty. Grab what you can!", DF("Display-ExtraBold", 34), m.FG, 1040, 724, 560, "left")
+    else
+        bag = left.ToStr() + " tiles left"
+        if left = 1 then bag = "1 tile left"
+        Txt(g, bag, DF("Display-ExtraBold", 40), m.FG, 1040, 720, 400, "left")
+    end if
+    line = ""
+    if s.votes <> invalid then line = s.votes
+    if Truthy(s.paused) then line = "Paused: nobody's connected"
+    if line <> "" then Txt(g, line, DF("Text-Bold", 28), m.FG2, 1440, 730, 420, "right")
+end sub
+
+sub drawFeed(g as Object, s as Object)
+    feed = []
+    if s.feed <> invalid then feed = s.feed
+    for i = 0 to feed.Count() - 1
+        if i >= 3 then exit for
+        e = feed[i]
+        y = 800 + i * 44
+        Avatar(g, e, 1040, y, 32)
+        l = Txt(g, e.name + " " + e.text, DF("Text-Bold", 26), m.FG, 1086, y + 2, 780, "left")
+        l.wrap = false
+        if i > 0 then l.opacity = 0.7
+    end for
+end sub
+
+sub showFlash(e as Object)
+    g = m.sea.flash
+    g.removeChildrenIndex(g.getChildCount(), 0)
+    card = DCard(g, 1040, 172, 820, 110, m.RED)
+    Avatar(card, e, 22, 22, 66)
+    l = Txt(card, e.name + " steals!", DF("Display-ExtraBold", 40), m.WHITE, 106, 12, 690, "left")
+    l.wrap = false
+    d = Txt(card, e.text, DF("Text-Bold", 28), m.WHITE, 106, 62, 690, "left")
+    d.wrap = false
+    g.visible = true
+    t = m.top.findNode("flashTimer")
+    t.control = "stop"
+    t.control = "start"
+end sub
+
+sub onFlashDone()
+    if m.sea <> invalid then m.sea.flash.visible = false
+end sub
+
+' Game over: the captain, everyone's haul, awards and the words nobody made.
+sub drawHaul(s as Object)
+    drawTitle(s)
+    v = m.view
+    ' Champion card.
+    champ = DCard(v, 80, 170, 700, 400, m.WHITE)
+    champs = []
+    if s.champs <> invalid then champs = s.champs
+    n = champs.Count()
+    if n > 0
+        size = 130
+        if n > 1 then size = 96
+        if n > 3 then size = 72
+        gap = 24
+        w = n * size + (n - 1) * gap
+        for i = 0 to n - 1
+            Avatar(champ, champs[i], (700 - w) / 2 + i * (size + gap), 40, size)
+        end for
+        badge = DCard(champ, (700 + w) / 2 - 30, 22, 110, 40, "0xFFC93CFF")
+        Txt(badge, "CAPTAIN", DF("Display-Bold", 18), m.INK, 0, 10, 110, "center")
+    end if
+    eyebrow = ""
+    if s.eyebrow <> invalid and n > 0 then eyebrow = UCase(s.eyebrow)
+    Txt(champ, eyebrow, DF("Display-Bold", 26), "0x22183699", 0, 196, 700, "center")
+    title = ""
+    if s.title <> invalid then title = s.title
+    tl = Txt(champ, title, DF("Display-ExtraBold", 60), m.INK, 20, 230, 660, "center")
+    tl.wrap = false
+    if s.points <> invalid then Txt(champ, s.points, DF("Text-Bold", 32), m.INK, 0, 318, 700, "center")
+    ' Awards, two by two.
+    awards = []
+    if s.awards <> invalid then awards = s.awards
+    for i = 0 to awards.Count() - 1
+        if i >= 4 then exit for
+        a = awards[i]
+        ax = 80 + (i mod 2) * 360
+        ay = 600 + (i \ 2) * 170
+        card = DCard(v, ax, ay, 340, 150, m.WHITE)
+        Avatar(card, a, 18, 18, 48)
+        Txt(card, UCase(a.title), DF("Display-Bold", 18), "0x22183699", 80, 18, 245, "left")
+        nm = Txt(card, a.name, DF("Display-Bold", 28), m.INK, 80, 42, 245, "left")
+        nm.wrap = false
+        if a.detail <> invalid
+            d = Txt(card, a.detail, DF("Text-Regular", 21), m.INK, 18, 86, 305, "left")
+            d.maxLines = 2
+        end if
+    end for
+    ' Everyone's haul.
+    Txt(v, "The haul", DF("Display-ExtraBold", 44), m.FG, 830, 160, 600, "left")
+    rows = []
+    if s.rows <> invalid then rows = s.rows
+    for i = 0 to rows.Count() - 1
+        if i >= 8 then exit for
+        r = rows[i]
+        fill = m.WHITE
+        if i = 0 and n > 0 then fill = "0xFFF1B8FF"
+        row = DCard(v, 830, 228 + i * 88, 1030, 78, fill)
+        Txt(row, (i + 1).ToStr(), DF("Display-ExtraBold", 34), m.INK, 10, 16, 50, "center")
+        Avatar(row, r, 66, 12, 54)
+        name = r.name
+        if Truthy(r.bot) then name = name + "  (bot)"
+        nm = Txt(row, name, DF("Display-Bold", 30), m.INK, 136, 6, 330, "left")
+        nm.wrap = false
+        if r.stats <> invalid
+            st = Txt(row, r.stats, DF("Text-Regular", 20), "0x22183699", 136, 44, 330, "left")
+            st.wrap = false
+        end if
+        words = ""
+        if r.words <> invalid
+            for each w in r.words
+                if words <> "" then words = words + "   "
+                words = words + w
+            end for
+        end if
+        wl = Txt(row, words, DF("Display-Bold", 24), m.INK, 480, 0, 420, "left")
+        wl.height = 78
+        wl.vertAlign = "center"
+        wl.wrap = true
+        wl.maxLines = 2
+        score = "0"
+        if r.score <> invalid then score = r.score.ToStr()
+        Txt(row, score, DF("Display-ExtraBold", 40), m.INK, 900, 14, 110, "right")
+    end for
+    line = ""
+    if s.missed <> invalid
+        if s.missed.Count() > 0
+            line = "Missed loot: "
+            for i = 0 to s.missed.Count() - 1
+                if i > 0 then line = line + ", "
+                line = line + s.missed[i]
+            end for
+        else
+            line = "Clean sweep: not a word left to make."
+        end if
+    end if
+    if line <> ""
+        ml = Txt(v, line, DF("Text-Bold", 26), m.FG2, 80, 944, 1330, "left")
+        ml.wrap = false
+    end if
+    if s.note <> invalid then Txt(v, s.note, DF("Display-Bold", 32), m.FG, 80, 994, 1330, "left")
+end sub
+
 ' Corner join chip (code + small QR), like the web TV keeps on screen during games.
 sub drawChip(s as Object, show as Boolean)
     m.chip.removeChildrenIndex(m.chip.getChildCount(), 0)
@@ -688,6 +1118,7 @@ sub drawTimer(secs as Integer)
     face = AddPoster(g, "pkg:/images/dot.png", 0, 0, 120, 120)
     face.blendColor = m.WHITE
     m.timerLabel = Txt(g, "", DF("Display-ExtraBold", 52), m.INK, 0, 26, 120, "center")
+    m.timerGroup = g
     setSecs(secs)
 end sub
 

@@ -62,6 +62,9 @@ sub init()
     m.catchingUp = false
     m.retries = 0
     m.playPath = ""
+    m.nativeGame = invalid ' the game a native start is waiting on (falls back to video if the bridge can't)
+    m.versionTask = invalid
+    m.updateAsked = false
 end sub
 
 ' Window keeps a tiny silent video looping so the Roku screensaver never starts; the TV plays one video at
@@ -82,6 +85,7 @@ sub onStreamer()
         pollStatus()
         t.control = "start"
         ensureBridge() ' stay in touch so the home Mac can hand a streamed room over to the native screen
+        checkStreamerVersion()
         if m.pendingStart <> invalid ' a deep link arrived before the home Mac was found
             m.top.autostart = m.pendingStart
             m.pendingStart = invalid
@@ -219,8 +223,49 @@ end sub
 
 ' ---- native TV screen (no video: the TV draws the room itself) --------------------------------
 ' Games the bridge can translate into native screens. Everything else uses the video stream.
+' The oldest home streamer that can draw everything in NativeGames(). An older one is asked to update itself
+' from GitHub (it refuses while a room is running).
+function MinStreamer() as String
+    return "2026-11-15.2"
+end function
+
+' "2026-11-15.2" style versions: the date, then the build number.
+function VersionAtLeast(v as String, min as String) as Boolean
+    a = v.Split(".")
+    b = min.Split(".")
+    if a.Count() < 2 or b.Count() < 2 then return false
+    if a[0] <> b[0] then return a[0] > b[0]
+    return Val(a[1]) >= Val(b[1])
+end function
+
+sub checkStreamerVersion()
+    if m.top.streamer = "" or m.versionTask <> invalid or m.updateAsked = true then return
+    m.versionTask = CreateObject("roSGNode", "FetchTask")
+    m.versionTask.url = m.top.streamer + "/diag"
+    m.versionTask.observeField("result", "onStreamerVersion")
+    m.versionTask.control = "RUN"
+end sub
+
+sub onStreamerVersion()
+    r = m.versionTask.result
+    m.versionTask = invalid
+    if not r.ok or r.data = invalid then return
+    v = ""
+    if r.data.version <> invalid then v = r.data.version
+    print "[window] home streamer version "; v
+    if v = "" or VersionAtLeast(v, MinStreamer()) then return
+    if r.data.running = true then return ' never mid-game; checked again next time the streamer is found
+    m.updateAsked = true
+    print "[window] asking the home streamer to update ("; v; " < "; MinStreamer(); ")"
+    t = CreateObject("roSGNode", "FetchTask")
+    t.method = "POST"
+    t.url = m.top.streamer + "/update"
+    t.control = "RUN"
+    m.updateTask = t
+end sub
+
 function NativeGames() as Object
-    return { punchline: true, imposter: true }
+    return { punchline: true, imposter: true, pirates: true }
 end function
 
 function BridgeHost() as String
@@ -252,6 +297,7 @@ sub onBridgeConnected()
 end sub
 
 sub startNative(game as Object)
+    m.nativeGame = game
     m.autoClose.control = "stop"
     setMode("starting")
     showStatus("Setting up " + game.name + Chr(8230), 0)
@@ -285,6 +331,11 @@ sub onBridgeMessage()
         text = "Dibs had a problem"
         if msg.text <> invalid then text = msg.text
         m.top.findNode("nativeTimer").control = "stop"
+        if m.mode = "starting" and m.nativeGame <> invalid
+            ' The home Mac's bridge can't draw this game (an older version): show it as video instead.
+            startVideo(m.nativeGame)
+            return
+        end if
         if m.mode = "starting"
             setMode("pick")
             m.autoClose.control = "start"
@@ -359,6 +410,7 @@ function DemoScreens(which as String) as Object
     dt = CreateObject("roDateTime")
     now = CDbl(dt.AsSeconds()) * CDbl(1000)
     if which = "demo-imposter" then return ImposterDemo(now)
+    if which = "demo-pirates" then return PiratesDemo(now)
     b = { game: "Punchline", color: "0xFFC93CFF", code: "DEMOAB", join: "https://dibsgames.com/punchline/game/DEMOAB", now: now }
     tony = { name: "Tony", color: "0x2DD4A0FF", host: true }
     maya = { name: "Maya", color: "0xFF7AC6FF" }
@@ -421,6 +473,12 @@ sub startGame()
         startNative(game)
         return
     end if
+    startVideo(game)
+end sub
+
+' Host a game as video through the streamer (also the fallback when the bridge can't draw it natively).
+sub startVideo(game as Object)
+    m.nativeGame = invalid
     m.autoClose.control = "stop"
     setMode("starting")
     showStatus("Setting up " + game.name + Chr(8230), 0)
@@ -644,4 +702,31 @@ function onKeyEvent(key as String, press as Boolean) as Boolean
         end if
     end if
     return true
+end function
+
+function PiratesDemo(now as Double) as Object
+    b = { game: "Pirates", color: "0x174A72FF", dark: true, code: "DEMOEF", join: "https://dibsgames.com/pirates/game/DEMOEF", now: now }
+    tony = { name: "Tony", color: "0x2DD4A0FF" }
+    maya = { name: "Maya", color: "0xFF7AC6FF" }
+    salty = { name: "Salty Sam", color: "0x47B5FFFF" }
+    dot = Chr(183)
+    holds1 = [With(tony, { score: 7, lead: true, voted: true, words: ["STEAM", "OX"] }), With(maya, { score: 4, words: ["RAIN"] }), With(salty, { score: 3, bot: true, words: ["TOE"] })]
+    holds2 = [With(tony, { score: 4, words: ["OX"] }), With(maya, { score: 4, words: ["RAIN"] }), With(salty, { score: 9, bot: true, lead: true, words: ["TOE", "MASTED"] })]
+    feed1 = [{ seq: 3, name: "Tony", color: "0x2DD4A0FF", text: "turned Maya's TEAM into STEAM", word: "STEAM", steal: true }, { seq: 2, name: "Salty Sam", color: "0x47B5FFFF", text: "grabbed TOE", word: "TOE" }, { seq: 1, name: "Maya", color: "0xFF7AC6FF", text: "grabbed TEAM", word: "TEAM" }]
+    feed2 = [{ seq: 4, name: "Salty Sam", color: "0x47B5FFFF", text: "turned Tony's STEAM into MASTED", word: "MASTED", steal: true }, feed1[0], feed1[1]]
+    return [
+        With(b, { t: "lobby", players: [With(tony, { host: true }), maya, With(salty, { bot: true })], max: 8, hint: "Tony starts the game from their phone", settings: "Words of 3+ letters   " + dot + "   72 tiles   " + dot + "   a flip every 5s" })
+        With(ParseJson(FormatJson(b)), PiratesBusy(0))
+        With(ParseJson(FormatJson(b)), PiratesBusy(1))
+        With(b, { t: "sea", kicker: "Grab and steal", pool: "QIRLNUEAPBDGIO", fresh: 13, bagLeft: 41, flips: 31, votes: "1/2 want the next tile", secs: 4, voteLabel: "FLIP", holds: holds1, feed: feed1 })
+        With(b, { t: "sea", kicker: "Grab and steal", pool: "QIRLNUEAPBGIOK", fresh: 13, bagLeft: 40, flips: 32, votes: "0/2 want the next tile", secs: 5, voteLabel: "FLIP", holds: holds2, feed: feed2 })
+        With(b, { t: "sea", kicker: "Last call", lastCall: true, pool: "QIRLNUPBGIOKWZ", fresh: 13, bagLeft: 0, flips: 72, votes: "1/2 done", secs: 95, voteLabel: "DONE", holds: holds2, feed: feed2 })
+        With(b, { t: "haul", champs: [salty], eyebrow: "Captain of the seas", title: "Salty Sam", points: "9 points of loot", rows: [With(salty, { score: 9, bot: true, words: ["TOE", "MASTED"], stats: "2 made " + dot + " 1 stolen " + dot + " 0 lost" }), With(tony, { score: 4, words: ["OX"], stats: "2 made " + dot + " 1 stolen " + dot + " 1 lost" }), With(maya, { score: 4, words: ["RAIN"], stats: "2 made " + dot + " 0 stolen " + dot + " 1 lost" })], awards: [With(salty, { title: "Longest word", detail: "MASTED, 6 letters" }), With(tony, { title: "Sticky fingers", detail: "1 steal" }), With(maya, { title: "Most robbed", detail: "Lost 1 word" })], missed: ["PLUNDER", "QUOKKA", "BRIG"], note: "Waiting for Tony to play again" })
+    ]
+end function
+
+' Two crowded moments from a real test game (4 pirates, then 8), for checking the layout under load.
+function PiratesBusy(i as Integer) as Object
+    if i = 0 then return ParseJson("{""game"": ""Pirates"", ""color"": ""0x174A72FF"", ""dark"": true, ""code"": ""PUHRME"", ""join"": ""https://dibsgames.com/pirates/game/PUHRME"", ""t"": ""sea"", ""kicker"": ""Last call"", ""lastCall"": true, ""paused"": false, ""pool"": ""QPBWGEQWERTYUIOPASDFGHJKLZXCVBNMAEIOU"", ""fresh"": 37, ""bagLeft"": 0, ""flips"": 72, ""votes"": ""0/2 done"", ""secs"": 120, ""holds"": [{""name"": ""Ana"", ""color"": ""0xC8A6FFFF"", ""score"": 19, ""bot"": false, ""away"": false, ""lead"": true, ""voted"": false, ""words"": [""AIR"", ""ADD"", ""DOT"", ""JOT"", ""GNU"", ""SAW"", ""OOZE"", ""AIR"", ""NUN"", ""EMIT"", ""FIX"", ""EYE"", ""EKE"", ""INLET"", ""AIL""]}, {""name"": ""Ben"", ""color"": ""0xFFB38AFF"", ""score"": 0, ""bot"": false, ""away"": false, ""lead"": false, ""voted"": false, ""words"": []}, {""name"": ""Squid Kid"", ""color"": ""0xFF78C4FF"", ""score"": 9, ""bot"": true, ""away"": false, ""lead"": false, ""voted"": false, ""words"": [""RAFT"", ""POUCH"", ""SAYS"", ""OVER""]}, {""name"": ""Barnacle Bea"", ""color"": ""0x47B5FFFF"", ""score"": 0, ""bot"": true, ""away"": false, ""lead"": false, ""voted"": false, ""words"": []}], ""voteLabel"": ""DONE"", ""feed"": [{""seq"": 23, ""name"": ""Squid Kid"", ""color"": ""0xFF78C4FF"", ""text"": ""turned Ana's ORE into OVER"", ""word"": ""OVER"", ""steal"": true}, {""seq"": 22, ""name"": ""Ana"", ""color"": ""0xC8A6FFFF"", ""text"": ""grabbed AIL"", ""word"": ""AIL"", ""steal"": false}, {""seq"": 21, ""name"": ""Ana"", ""color"": ""0xC8A6FFFF"", ""text"": ""grabbed INLET"", ""word"": ""INLET"", ""steal"": false}, {""seq"": 20, ""name"": ""Ana"", ""color"": ""0xC8A6FFFF"", ""text"": ""grabbed EKE"", ""word"": ""EKE"", ""steal"": false}]}")
+    return ParseJson("{""game"": ""Pirates"", ""color"": ""0x174A72FF"", ""dark"": true, ""code"": ""PUHRME"", ""join"": ""https://dibsgames.com/pirates/game/PUHRME"", ""t"": ""sea"", ""kicker"": ""Last call"", ""lastCall"": true, ""paused"": false, ""pool"": ""QPBWGEQWERTYUIOPASDFGHJKLZXCVBNMAEIOU"", ""fresh"": 37, ""bagLeft"": 0, ""flips"": 72, ""votes"": ""0/2 done"", ""secs"": 120, ""holds"": [{""name"": ""Ana"", ""color"": ""0xC8A6FFFF"", ""score"": 19, ""bot"": false, ""away"": false, ""lead"": true, ""voted"": false, ""words"": [""AIR"", ""ADD"", ""DOT"", ""JOT"", ""GNU"", ""SAW"", ""OOZE"", ""AIR"", ""NUN"", ""EMIT"", ""FIX"", ""EYE"", ""EKE"", ""INLET"", ""AIL""]}, {""name"": ""Ben"", ""color"": ""0xFFB38AFF"", ""score"": 0, ""bot"": false, ""away"": false, ""lead"": false, ""voted"": false, ""words"": []}, {""name"": ""Squid Kid"", ""color"": ""0xFF78C4FF"", ""score"": 9, ""bot"": true, ""away"": false, ""lead"": false, ""voted"": true, ""words"": [""RAFT"", ""POUCH"", ""SAYS"", ""OVER""]}, {""name"": ""Barnacle Bea"", ""color"": ""0x47B5FFFF"", ""score"": 0, ""bot"": true, ""away"": false, ""lead"": false, ""voted"": false, ""words"": []}, {""name"": ""Captain Long Name"", ""color"": ""0xFF6B57FF"", ""score"": 19, ""bot"": false, ""away"": false, ""lead"": false, ""voted"": false, ""words"": [""AIR"", ""ADD"", ""DOT"", ""JOT"", ""GNU"", ""SAW""]}, {""name"": ""Mo"", ""color"": ""0xFFC93CFF"", ""score"": 19, ""bot"": false, ""away"": false, ""lead"": false, ""voted"": true, ""words"": [""AIR"", ""ADD"", ""DOT"", ""JOT"", ""GNU"", ""SAW""]}, {""name"": ""Priya"", ""color"": ""0x9B6CFFFF"", ""score"": 19, ""bot"": false, ""away"": false, ""lead"": false, ""voted"": false, ""words"": [""AIR"", ""ADD"", ""DOT"", ""JOT"", ""GNU"", ""SAW""]}, {""name"": ""Jules"", ""color"": ""0xA8E05FFF"", ""score"": 19, ""bot"": false, ""away"": false, ""lead"": false, ""voted"": false, ""words"": [""AIR"", ""ADD"", ""DOT"", ""JOT"", ""GNU"", ""SAW""]}], ""voteLabel"": ""DONE"", ""feed"": [{""seq"": 23, ""name"": ""Squid Kid"", ""color"": ""0xFF78C4FF"", ""text"": ""turned Ana's ORE into OVER"", ""word"": ""OVER"", ""steal"": true}, {""seq"": 22, ""name"": ""Ana"", ""color"": ""0xC8A6FFFF"", ""text"": ""grabbed AIL"", ""word"": ""AIL"", ""steal"": false}, {""seq"": 21, ""name"": ""Ana"", ""color"": ""0xC8A6FFFF"", ""text"": ""grabbed INLET"", ""word"": ""INLET"", ""steal"": false}, {""seq"": 20, ""name"": ""Ana"", ""color"": ""0xC8A6FFFF"", ""text"": ""grabbed EKE"", ""word"": ""EKE"", ""steal"": false}]}")
 end function
