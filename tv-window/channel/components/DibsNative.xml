@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Native Dibs TV screen: draws what the web /tv page shows, from small "screen" messages the bridge on the
+  home streamer sends (see tools/streamer/bridge.mjs). No video, so it's as fast as the network.
+
+  screen = { t: "lobby" | "stage" | "matchup" | "scores" | "message", ... } (see DibsNative.brs)
+  base   = the streamer's http base (for QR images), e.g. "http://10.0.0.188:8790"
+-->
+<component name="DibsNative" extends="Group">
+  <interface>
+    <field id="screen" type="assocarray" onChange="onScreen" />
+    <field id="base" type="string" />
+  </interface>
+  <script type="text/brightscript" uri="DibsNative.brs" />
+  <script type="text/brightscript" uri="lib/util.brs" />
+  <children>
+    <Rectangle id="bg" width="1920" height="1080" color="0xFFC93CFF" />
+    <Poster uri="pkg:/images/dibs_dots.png" width="1920" height="1080" blendColor="0x221836FF" />
+    <Group id="view" />
+    <Group id="chip" visible="false" />
+    <Timer id="tick" duration="0.25" repeat="true" />
+  </children>
+</component>

@@ -13,6 +13,8 @@
     "logo": "node assets/logo.mjs"
   },
   "devDependencies": {
+    "@expo-google-fonts/bricolage-grotesque": "^0.4.1",
+    "@expo-google-fonts/dm-sans": "^0.4.2",
     "@expo-google-fonts/inter": "^0.4.2",
     "@expo-google-fonts/nunito": "^0.4.2",
     "@fontsource/bricolage-grotesque": "^5.3.0",

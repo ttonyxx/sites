@@ -22,6 +22,26 @@ import path from "node:path";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import puppeteer from "puppeteer-core";
+import net from "node:net";
+
+const HERE = path.dirname(fileURLToPath(import.meta.url));
+
+// Dependencies added after a machine was installed: /update only swaps this file, so install what's missing.
+async function need(name, version) {
+  try {
+    return (await import(name)).default;
+  } catch {
+    console.log(`installing ${name}@${version}`);
+    const npm = path.join(path.dirname(process.execPath), "npm");
+    await new Promise((resolve) => {
+      const p = spawn(fs.existsSync(npm) ? npm : "npm", ["install", "--no-audit", "--no-fund", "--omit=dev", `${name}@${version}`], { cwd: HERE, stdio: "inherit" });
+      p.on("exit", resolve);
+      p.on("error", resolve);
+    });
+    return (await import(`${name}?installed=${Date.now()}`).catch(() => import(name))).default;
+  }
+}
+const QRCode = await need("qrcode", "^1.5.4");
 
 const PORT = Number(process.env.PORT || 8790);
 const DIBS = (process.env.DIBS_URL || "https://dibsgames.com").replace(/\/$/, "");
@@ -53,7 +73,7 @@ try {
   if (orphans.length) console.log(`stopped ${orphans.length} leftover encoder(s)`);
 } catch {}
 const LIVE = fs.mkdtempSync(path.join(os.tmpdir(), "dibs-live-"));
-const VERSION = "2026-11-14.9";
+const VERSION = "2026-11-14.10";
 // Stream size. The page still renders at 1920x1080 (the TV layout Dibs expects); the capture is scaled down.
 // 720p is plenty for Dibs's big type and halves the work per frame on a busy Mac. OUT=1080 for full HD.
 const OUT_H = Number(process.env.OUT || 720);
@@ -161,6 +181,7 @@ async function start(gameId) {
   const label = GAMES[gameId];
   if (!label) throw new Error(`unknown game "${gameId}"`);
   await stop();
+  closeNative();
   clearLive();
 
   const page = await takeHub();
@@ -250,7 +271,7 @@ http
       if (url.pathname === "/status") {
         if (session) lastHit = Date.now();
         if (/Roku/i.test(req.headers["user-agent"] || "")) tvIp = (req.socket.remoteAddress || "").replace(/^::ffff:/, "") || tvIp;
-        return json(200, { running: !!session, game: session?.game ?? null, code: session?.code ?? null, frames: session?.frames ?? 0, games: Object.keys(GAMES) });
+        return json(200, { running: !!session || !!nroom, game: session?.game ?? nroom?.key ?? null, code: session?.code ?? nroom?.code ?? null, mode: session ? "stream" : nroom ? "native" : null, frames: session?.frames ?? 0, games: Object.keys(GAMES) });
       }
       if (url.pathname === "/start" && req.method === "POST") return json(200, await start(url.searchParams.get("game") || "punchline"));
       if (url.pathname === "/stop" && req.method === "POST") { await stop(); return json(200, { ok: true }); }
@@ -311,6 +332,15 @@ http
         json(200, { ok: true, updated: true });
         setTimeout(async () => { await browser?.close().catch(() => {}); process.exit(0); }, 300);
         return;
+      }
+      if (url.pathname === "/qr.png") {
+        // QR codes for the native TV screen (Roku can't make them). Only for dibsgames.com links.
+        const data = url.searchParams.get("data") || "";
+        if (!/^https:\/\/(www\.)?dibsgames\.com\//.test(data)) return json(400, { error: "bad data" });
+        const size = Math.min(1024, Number(url.searchParams.get("size")) || 480);
+        const png = await QRCode.toBuffer(data, { type: "png", margin: 1, width: size, errorCorrectionLevel: "M", color: { dark: "#221836", light: "#FFFFFF" } });
+        res.writeHead(200, { "Content-Type": "image/png", "Cache-Control": "max-age=3600" });
+        return res.end(png);
       }
       if (url.pathname === "/frame.jpg" && session?.frame) { res.writeHead(200, { "Content-Type": "image/jpeg" }); return res.end(session.frame); }
       if (url.pathname.startsWith("/live/")) {
@@ -427,6 +457,175 @@ if (process.env.NO_SSDP !== "1") {
     try { ssdp.addMembership("239.255.255.250"); } catch (e) { log("ssdp membership:", e.message); }
   });
 }
+
+// ---- native TV bridge ------------------------------------------------------------------------------
+// The Roku draws Dibs itself (no video): this joins the room as a seatless "screen" over Dibs's WebSocket
+// (wss + Origin check, which a Roku can't do) and sends the TV small "screen" messages over a plain LAN
+// socket (newline-delimited JSON on BRIDGE_PORT). See channel/components/DibsNative.brs for the screens.
+const API = process.env.DIBS_API || "https://gamebox-production-a48f.up.railway.app";
+const BRIDGE_PORT = Number(process.env.BRIDGE_PORT || 8791);
+const WS = await need("ws", "^8.18.0");
+const AVATAR_COLORS = ["#FF6B57", "#FFC93C", "#2FD6A3", "#47B5FF", "#9B6CFF", "#FF78C4", "#A8E05F", "#FF9A3C", "#2BC6C6", "#C8A6FF", "#FFB38A", "#5B7CFF"];
+const fnv = (s) => { let h = 0x811c9dc5; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 0x01000193); } return h >>> 0; };
+const avatarColor = (name) => "0x" + AVATAR_COLORS[fnv((name || "").trim().toLowerCase() || "?") % 12].slice(1) + "FF";
+const names = (ps) => (ps.length <= 3 ? ps.map((p) => p.name).join(", ") : `${ps.slice(0, 2).map((p) => p.name).join(", ")} and ${ps.length - 2} more`);
+
+function punchlineScreen(s, room) {
+  const base = { game: "Punchline", color: "0xFFD84AFF", code: room.code, join: `https://dibsgames.com/punchline/game/${room.code}`, now: Date.now() };
+  const players = (s.players || []).map((p) => ({ id: p.id, name: p.name, color: avatarColor(p.name), host: p.id === s.hostId, online: p.online !== false, spectator: !!p.spectator, score: p.score || 0 }));
+  const endsAt = s.timeRemaining > 0 ? Date.now() + s.timeRemaining * 1000 : undefined;
+  const done = new Set(s.submittedPlayers || []);
+  const active = players.filter((p) => !p.spectator && p.online);
+  const roster = active.map((p) => ({ name: p.name, color: p.color, done: done.has(p.id) }));
+  const pending = active.filter((p) => !done.has(p.id));
+  const ph = s.phase;
+  if (ph === "lobby") {
+    const online = players.filter((p) => p.online).length;
+    const host = players.find((p) => p.host);
+    let hint = "Scan the code to join. Whoever gets in first is the host.";
+    if (players.length) hint = online < 3 ? `Need ${3 - online} more player${3 - online === 1 ? "" : "s"} to start` : `${host?.name ?? "The host"} starts the game from their phone`;
+    return { ...base, t: "lobby", players: players.map((p) => ({ name: p.name, color: p.color, host: p.host, away: !p.online })), max: 16, hint };
+  }
+  if (/_answer$/.test(ph) || ph === "round1_write_question") {
+    const heading = { round1_answer: "Write two funny answers", round2_answer: "Answer your friends' prompts", round3_answer: "Everyone answers the same prompt", round1_write_question: "Write a prompt for round 2" }[ph];
+    const kicker = ph === "round3_answer" ? "Final round" : ph === "round1_write_question" ? "Round 2 prep" : `Round ${s.round}`;
+    return { ...base, t: "stage", kicker, heading, body: pending.length ? `Still writing: ${names(pending)}` : "Everyone's in! Hang tight.", phones: true, endsAt, players: roster };
+  }
+  if (ph === "round1_vote" || ph === "round2_vote") {
+    const vp = (s.votePairs || [])[0];
+    if (!vp) return null;
+    const voted = done.size, expected = Math.max(s.votersExpected || 0, voted);
+    return { ...base, t: "matchup", kicker: `Vote ${s.currentVoteIndex + 1} of ${s.totalVotePairs}`, prompt: vp.questionText, byline: vp.questionAuthor ? `Written by ${vp.questionAuthor}` : undefined,
+      answers: [{ text: vp.answer1.text }, { text: vp.answer2.text }], endsAt, note: `${voted} of ${expected} votes in` };
+  }
+  if (ph === "round1_results" || ph === "round2_results") {
+    const r = (s.voteResults || [])[s.currentVoteIndex];
+    if (!r) return null;
+    const side = (a, voters, pts, bonus) => ({ text: a.text, author: a.playerName, color: avatarColor(a.playerName), votes: voters.length, points: pts, winner: !!r.winner && r.winner === a.playerId, sweep: bonus > 0 });
+    const a1 = side(r.answer1, r.votersFor1 || [], r.pointsEarned1, r.sweepBonus1), a2 = side(r.answer2, r.votersFor2 || [], r.pointsEarned2, r.sweepBonus2);
+    const w = a1.winner ? a1 : a2.winner ? a2 : null;
+    const note = w ? `${w.author} takes it!` : (r.votersFor1?.length || r.votersFor2?.length) ? "It's a tie!" : "Nobody voted!";
+    return { ...base, t: "matchup", kicker: `Result ${s.currentVoteIndex + 1} of ${s.totalVotePairs}`, prompt: r.questionText, answers: [a1, a2], reveal: true, endsAt, note };
+  }
+  if (ph === "round3_vote") {
+    const vp = s.votePairs || [];
+    return { ...base, t: "list", kicker: "Final round · Pick your top 3", prompt: vp[0]?.questionText ?? "", items: vp.map((x) => ({ text: x.answer1.text })), endsAt, phones: true,
+      note: pending.length ? `Still picking: ${names(pending)}` : "Everyone's in!" };
+  }
+  if (ph === "round3_results") {
+    return { ...base, t: "list", kicker: "Final round · Results", prompt: s.round3Prompt ?? "", reveal: true, endsAt,
+      items: (s.round3Results || []).map((x, i) => ({ text: x.answer.text, author: x.answer.playerName, color: avatarColor(x.answer.playerName), points: x.totalPoints, place: i + 1 })) };
+  }
+  if (ph === "results") {
+    const rows = [...players].sort((a, b) => b.score - a.score || a.name.localeCompare(b.name)).map((p) => ({ name: p.name, color: p.color, score: p.score }));
+    const tie = rows[1] && rows[0] && rows[1].score === rows[0].score;
+    const host = players.find((p) => p.host);
+    return { ...base, t: "scores", title: tie ? "It's a tie!" : `${rows[0]?.name ?? "Nobody"} wins!`, rows, final: true, note: host ? `Waiting for ${host.name} to start a new game` : undefined };
+  }
+  return null;
+}
+
+const NATIVE = { punchline: { name: "Punchline", create: "/api/create-room", ws: "/ws", translate: punchlineScreen } };
+const tvs = new Set();
+let nroom = null; // { key, g, code, ws, screen, ping, attempts, dead }
+let lastTv = Date.now();
+
+function tvSend(obj, only) {
+  const line = JSON.stringify(obj) + "\n";
+  for (const s of only ? [only] : tvs) { try { s.write(line); } catch {} }
+}
+
+function closeNative() {
+  if (!nroom) return;
+  const r = nroom;
+  nroom = null;
+  r.dead = true;
+  clearInterval(r.ping);
+  try { r.ws?.close(); } catch {}
+  log("native room closed", r.code);
+}
+
+async function hostNative(key) {
+  const g = NATIVE[key];
+  if (!g) throw new Error(`no native screen for "${key}"`);
+  closeNative();
+  await stop(); // one room at a time: end any video-streamed room
+  const r = await fetch(`${API}${g.create}`, { method: "POST", headers: { "Content-Type": "application/json", Origin: "https://dibsgames.com" }, body: JSON.stringify({ playerName: "TV" }), signal: AbortSignal.timeout(10000) });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok || !j.roomCode) throw new Error(j.error || `create-room ${r.status}`);
+  nroom = { key, g, code: j.roomCode, ws: null, screen: null, attempts: 0, dead: false };
+  connectNative(nroom);
+  tvSend({ t: "room", game: key, code: nroom.code });
+  log("native", g.name, "room", nroom.code);
+}
+
+function connectNative(room) {
+  const ws = new WS(`${API.replace(/^http/, "ws")}${room.g.ws}?roomCode=${room.code}&screen=1`, { origin: "https://dibsgames.com" });
+  room.ws = ws;
+  ws.on("open", () => {
+    room.attempts = 0;
+    clearInterval(room.ping);
+    room.ping = setInterval(() => { try { ws.send('{"type":"ping"}'); } catch {} }, 10000); // also keeps the room alive
+  });
+  ws.on("message", (buf) => {
+    let msg;
+    try { msg = JSON.parse(buf.toString()); } catch { return; }
+    if (msg.type === "game_state") {
+      const screen = room.g.translate(msg.payload, room);
+      if (screen && nroom === room) { room.screen = screen; tvSend(screen); }
+    } else if (msg.type === "closed" || msg.type === "error") {
+      room.dead = true;
+      if (nroom === room) {
+        hostNative(room.key).then(() => tvSend({ t: "status", text: "Everyone left, so here's a fresh room" }))
+          .catch(() => { nroom = null; tvSend({ t: "ended", text: "That room closed" }); });
+      }
+    }
+  });
+  ws.on("close", () => {
+    clearInterval(room.ping);
+    if (room.dead || nroom !== room) return;
+    const delay = Math.min(8000, 600 * 2 ** room.attempts++) + Math.random() * 400;
+    setTimeout(() => { if (nroom === room && !room.dead) connectNative(room); }, delay);
+  });
+  ws.on("error", () => {});
+}
+
+// No Window on the TV for a while (another app, TV off): let the room go.
+setInterval(() => {
+  if (nroom && tvs.size === 0 && Date.now() - lastTv > IDLE_MS) { log("no TV for a while, closing native room"); closeNative(); }
+}, 10000);
+
+net.createServer((sock) => {
+  sock.setNoDelay(true);
+  sock.setKeepAlive(true, 15000);
+  tvs.add(sock);
+  lastTv = Date.now();
+  let buf = "";
+  sock.on("data", async (d) => {
+    buf += d.toString();
+    let i;
+    while ((i = buf.indexOf("\n")) >= 0) {
+      const line = buf.slice(0, i).trim();
+      buf = buf.slice(i + 1);
+      if (!line) continue;
+      let m;
+      try { m = JSON.parse(line); } catch { continue; }
+      lastTv = Date.now();
+      try {
+        if (m.op === "host") await hostNative(m.game);
+        else if (m.op === "resume") {
+          if (nroom) { tvSend({ t: "room", game: nroom.key, code: nroom.code }, sock); if (nroom.screen) tvSend({ ...nroom.screen, now: Date.now() }, sock); }
+          else tvSend({ t: "ended" }, sock);
+        } else if (m.op === "leave") { closeNative(); tvSend({ t: "ended" }); }
+      } catch (e) {
+        log("bridge:", e.message);
+        tvSend({ t: "error", text: "Couldn't start the room: " + e.message }, sock);
+      }
+    }
+  });
+  sock.on("close", () => { tvs.delete(sock); lastTv = Date.now(); });
+  sock.on("error", () => {});
+}).listen(BRIDGE_PORT, "0.0.0.0", () => log(`native TV bridge on :${BRIDGE_PORT}`));
 
 for (const sig of ["SIGINT", "SIGTERM"]) process.on(sig, async () => {
   const enc = session?.ffmpeg;

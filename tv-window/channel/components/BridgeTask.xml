@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Persistent TCP link to the Dibs bridge on the home streamer (Roku can't speak Dibs's TLS WebSocket, but a
+  plain LAN socket is fine). Newline-delimited JSON both ways. Set host ("ip:port"), control = "RUN"; write a
+  JSON line to `send`; every incoming line arrives in `message`. Reconnects by itself until stop = true.
+-->
+<component name="BridgeTask" extends="Task">
+  <interface>
+    <field id="host" type="string" />
+    <field id="send" type="string" alwaysNotify="true" />
+    <field id="message" type="assocarray" alwaysNotify="true" />
+    <field id="connected" type="boolean" alwaysNotify="true" />
+    <field id="stop" type="boolean" />
+  </interface>
+  <script type="text/brightscript" uri="BridgeTask.brs" />
+</component>
