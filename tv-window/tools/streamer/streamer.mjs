@@ -53,7 +53,7 @@ try {
   if (orphans.length) console.log(`stopped ${orphans.length} leftover encoder(s)`);
 } catch {}
 const LIVE = fs.mkdtempSync(path.join(os.tmpdir(), "dibs-live-"));
-const VERSION = "2026-11-14.8";
+const VERSION = "2026-11-14.9";
 // Stream size. The page still renders at 1920x1080 (the TV layout Dibs expects); the capture is scaled down.
 // 720p is plenty for Dibs's big type and halves the work per frame on a busy Mac. OUT=1080 for full HD.
 const OUT_H = Number(process.env.OUT || 720);
@@ -249,6 +249,7 @@ http
     try {
       if (url.pathname === "/status") {
         if (session) lastHit = Date.now();
+        if (/Roku/i.test(req.headers["user-agent"] || "")) tvIp = (req.socket.remoteAddress || "").replace(/^::ffff:/, "") || tvIp;
         return json(200, { running: !!session, game: session?.game ?? null, code: session?.code ?? null, frames: session?.frames ?? 0, games: Object.keys(GAMES) });
       }
       if (url.pathname === "/start" && req.method === "POST") return json(200, await start(url.searchParams.get("game") || "punchline"));
@@ -264,7 +265,8 @@ http
       if (url.pathname === "/diag") {
         const s = session;
         const d = { version: VERSION, uptime: Math.round(process.uptime()), host: os.hostname(), platform: `${os.type()} ${os.release()} ${os.arch()}`,
-          load: os.loadavg().map((n) => +n.toFixed(2)), chrome: browser?.connected ? await browser.version() : null, hubPreloaded: !!warm, running: !!s };
+          load: os.loadavg().map((n) => +n.toFixed(2)), chrome: browser?.connected ? await browser.version() : null, hubPreloaded: !!warm, running: !!s,
+          tv: { ip: tvIp, autoOpen: AUTO_OPEN, homeIdleMinutes: HOME_IDLE_MS / 60000, power: tvState.power, lastAction: tvState.lastAction } };
         if (s) {
           const now = Date.now();
           d.game = s.game; d.code = s.code;
@@ -340,6 +342,64 @@ http
     const ips = Object.values(os.networkInterfaces()).flat().filter((i) => i && i.family === "IPv4" && !i.internal).map((i) => i.address);
     log(`Dibs TV streamer on :${PORT}  (TV should use http://${ips[0] || "localhost"}:${PORT})  rendering ${DIBS}/tv`);
   });
+
+// ---- keep Window on the TV ----------------------------------------------------------------------
+// When the TV turns on, or sits on the Roku home screen / Roku screensaver for a few minutes, open Window.
+// ECP queries and "launch" are allowed in the TV's default Limited mode. AUTO_OPEN=0 turns this off;
+// HOME_IDLE_MINUTES=0 keeps only the power-on behaviour.
+const AUTO_OPEN = process.env.AUTO_OPEN !== "0";
+const HOME_IDLE_MS = Number(process.env.HOME_IDLE_MINUTES ?? 3) * 60000;
+let tvIp = process.env.TV_IP || null;
+const tvState = { power: null, onAt: 0, homeSince: 0, lastAction: null };
+
+function findRoku() {
+  return new Promise((resolve) => {
+    const sock = dgram.createSocket({ type: "udp4", reuseAddr: true });
+    let done = false;
+    const finish = (ip) => { if (done) return; done = true; try { sock.close(); } catch {} resolve(ip); };
+    sock.on("message", (m, r) => { if (/roku:ecp/i.test(m.toString())) finish(r.address); });
+    sock.on("error", () => finish(null));
+    sock.bind(() => {
+      const q = Buffer.from('M-SEARCH * HTTP/1.1\r\nHOST: 239.255.255.250:1900\r\nMAN: "ssdp:discover"\r\nST: roku:ecp\r\nMX: 1\r\n\r\n');
+      sock.send(q, 1900, "239.255.255.250");
+    });
+    setTimeout(() => finish(null), 2500);
+  });
+}
+
+async function ecp(pathname, method = "GET") {
+  const r = await fetch(`http://${tvIp}:8060${pathname}`, { method, signal: AbortSignal.timeout(4000) });
+  return { status: r.status, text: method === "GET" ? await r.text() : "" };
+}
+
+async function watchTv() {
+  if (!AUTO_OPEN) return;
+  try {
+    if (!tvIp) tvIp = await findRoku();
+    if (!tvIp) return;
+    const power = ((await ecp("/query/device-info")).text.match(/<power-mode>([^<]+)</) || [])[1] || null;
+    const now = Date.now();
+    if (power === "PowerOn" && tvState.power && tvState.power !== "PowerOn") tvState.onAt = now;
+    tvState.power = power;
+    if (power !== "PowerOn") { tvState.homeSince = 0; return; }
+    const app = (await ecp("/query/active-app")).text;
+    const idleHome = /type="home"/.test(app) || /<screensaver/.test(app);
+    if (!idleHome) { tvState.homeSince = 0; return; }
+    if (!tvState.homeSince) tvState.homeSince = now;
+    const justOn = tvState.onAt && now - tvState.onAt < 90000;
+    const idleLong = HOME_IDLE_MS > 0 && now - tvState.homeSince >= HOME_IDLE_MS;
+    if (justOn || idleLong) {
+      const r = await ecp("/launch/dev", "POST");
+      tvState.lastAction = `${new Date().toISOString().slice(11, 19)} ${justOn ? "TV turned on" : "idle on home"} -> opened Window (${r.status})`;
+      log(tvState.lastAction);
+      tvState.onAt = 0;
+      tvState.homeSince = 0;
+    }
+  } catch {
+    // TV off or unreachable; try again next round.
+  }
+}
+setInterval(watchTv, 10000);
 
 // ---- LAN discovery (SSDP) ---------------------------------------------------------------------
 function lanAddressFor(remote) {

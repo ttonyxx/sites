@@ -50,6 +50,20 @@ sub init()
     m.autoClose.observeField("fire", "closePanel")
     m.top.findNode("statusTimer").observeField("fire", "hideStatus")
     m.top.findNode("poll").observeField("fire", "pollStatus")
+    m.top.findNode("stallTimer").observeField("fire", "onStall")
+    m.top.findNode("stuckTimer").observeField("fire", "onStuck")
+    m.expectStop = false
+    m.catchingUp = false
+    m.retries = 0
+    m.playPath = ""
+end sub
+
+' Window keeps a tiny silent video looping so the Roku screensaver never starts; the TV plays one video at
+' a time, so it pauses while a Dibs stream is on screen.
+sub keepAwake(on as Boolean)
+    v = m.top.getScene().findNode("keepAwake")
+    if v = invalid then return
+    if on then v.control = "play" else v.control = "stop"
 end sub
 
 ' ---- streamer status (also keeps a parked room alive) -------------------------------------------
@@ -244,33 +258,84 @@ sub resumeGame()
 end sub
 
 sub play(hlsPath as String)
+    m.playPath = hlsPath
+    m.retries = 0
+    keepAwake(false)
+    startStream()
+    setMode("playing")
+    m.top.setFocus(true)
+end sub
+
+sub startStream()
     c = CreateObject("roSGNode", "ContentNode")
-    c.url = m.top.streamer + hlsPath
+    c.url = m.top.streamer + m.playPath
     c.streamFormat = "hls"
     c.live = true
     m.video.content = c
     m.video.visible = true
     m.video.control = "play"
-    setMode("playing")
-    m.top.setFocus(true)
 end sub
 
+' Never leave a black screen: say so after 2 s of buffering, restart at the live edge after 10 s, and give up
+' (back to the picker) after a few failed restarts.
 sub onVideoState()
     s = m.video.state
     print "[window] dibs video "; s
-    if s = "error" and m.mode = "playing"
+    if m.mode <> "playing" then return
+    if s = "buffering"
+        m.top.findNode("stallTimer").control = "start"
+    else if s = "playing"
+        m.top.findNode("stallTimer").control = "stop"
+        m.top.findNode("stuckTimer").control = "stop"
+        if m.catchingUp
+            m.catchingUp = false
+            hideStatus()
+        end if
+    else if s = "stopped" and m.expectStop
+        m.expectStop = false
+    else if s = "error" or s = "finished" or s = "stopped"
+        recoverStream()
+    end if
+end sub
+
+sub onStall()
+    if m.mode <> "playing" or m.video.state <> "buffering" then return
+    m.catchingUp = true
+    showStatus("Catching up" + Chr(8230), 0)
+    m.top.findNode("stuckTimer").control = "start"
+end sub
+
+sub onStuck()
+    if m.mode = "playing" and m.video.state = "buffering" then recoverStream()
+end sub
+
+sub recoverStream()
+    m.retries = m.retries + 1
+    if m.retries > 4
         m.video.visible = false
+        keepAwake(true)
         setMode("pick")
         pollStatus()
         showStatus("The stream stopped. Pick a game to start again.", 6)
         m.autoClose.control = "start"
+        return
     end if
+    print "[window] dibs stream restart "; m.retries
+    m.catchingUp = true
+    showStatus("Reconnecting" + Chr(8230), 0)
+    m.expectStop = true
+    m.video.control = "stop"
+    startStream()
 end sub
 
 ' Leave the stream but keep the room running; the dock's Dibs tile and "Back to" button return to it.
 sub parkGame(closeAfter as Boolean)
+    m.expectStop = true
     m.video.control = "stop"
     m.video.visible = false
+    m.top.findNode("stallTimer").control = "stop"
+    m.top.findNode("stuckTimer").control = "stop"
+    keepAwake(true)
     hideStatus()
     m.mode = "pick"
     if closeAfter
@@ -283,8 +348,10 @@ sub parkGame(closeAfter as Boolean)
 end sub
 
 sub stopRoom()
+    m.expectStop = true
     m.video.control = "stop"
     m.video.visible = false
+    keepAwake(true)
     t = CreateObject("roSGNode", "FetchTask")
     t.method = "POST"
     t.url = m.top.streamer + "/stop"

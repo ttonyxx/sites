@@ -44,6 +44,8 @@
     <Timer id="autoClose" duration="120" repeat="false" />
     <Timer id="statusTimer" duration="5" repeat="false" />
     <Timer id="poll" duration="30" repeat="true" />
+    <Timer id="stallTimer" duration="2" repeat="false" />
+    <Timer id="stuckTimer" duration="10" repeat="false" />
     <Animation id="pop" duration="0.3" easeFunction="outCubic">
       <FloatFieldInterpolator key="[0,1]" keyValue="[0,1]" fieldToInterp="body.opacity" />
       <Vector2DFieldInterpolator key="[0,1]" keyValue="[[0,30],[0,0]]" fieldToInterp="body.translation" />
