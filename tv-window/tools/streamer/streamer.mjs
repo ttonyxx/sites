@@ -73,7 +73,7 @@ try {
   if (orphans.length) console.log(`stopped ${orphans.length} leftover encoder(s)`);
 } catch {}
 const LIVE = fs.mkdtempSync(path.join(os.tmpdir(), "dibs-live-"));
-const VERSION = "2026-11-14.12";
+const VERSION = "2026-11-15.1";
 // Stream size. The page still renders at 1920x1080 (the TV layout Dibs expects); the capture is scaled down.
 // 720p is plenty for Dibs's big type and halves the work per frame on a busy Mac. OUT=1080 for full HD.
 const OUT_H = Number(process.env.OUT || 720);
@@ -177,7 +177,8 @@ async function stop() {
   setTimeout(prewarm, 1500);
 }
 
-async function start(gameId) {
+// roomCode: show an existing room (one the host switched to from a native screen) instead of making one.
+async function start(gameId, roomCode) {
   const label = GAMES[gameId];
   if (!label) throw new Error(`unknown game "${gameId}"`);
   await stop();
@@ -186,16 +187,20 @@ async function start(gameId) {
 
   const page = await takeHub();
 
-  // Pick the game on the hub the way a person would: click the card that names it.
-  const clicked = await page.evaluate((name) => {
-    const els = [...document.querySelectorAll("button, a, [role=button]")];
-    const el = els.find((e) => e.textContent && e.textContent.trim().toLowerCase().startsWith(name.toLowerCase()))
-      || els.find((e) => e.textContent && e.textContent.toLowerCase().includes(name.toLowerCase()));
-    if (!el) return false;
-    el.click();
-    return true;
-  }, label);
-  if (!clicked) throw new Error(`couldn't find "${label}" on ${DIBS}/tv`);
+  if (roomCode) {
+    await page.goto(`${DIBS}/tv/${gameId}/${roomCode}`, { waitUntil: "domcontentloaded" });
+  } else {
+    // Pick the game on the hub the way a person would: click the card that names it.
+    const clicked = await page.evaluate((name) => {
+      const els = [...document.querySelectorAll("button, a, [role=button]")];
+      const el = els.find((e) => e.textContent && e.textContent.trim().toLowerCase().startsWith(name.toLowerCase()))
+        || els.find((e) => e.textContent && e.textContent.toLowerCase().includes(name.toLowerCase()));
+      if (!el) return false;
+      el.click();
+      return true;
+    }, label);
+    if (!clicked) throw new Error(`couldn't find "${label}" on ${DIBS}/tv`);
+  }
   await page.waitForFunction(() => /^\/tv\/[^/]+\/[A-Z]{6}$/.test(location.pathname), { timeout: 20000 });
   const code = page.url().split("/").pop();
   log("hosting", label, "room", code);
@@ -228,6 +233,17 @@ async function start(gameId) {
 
   const cdp = await page.createCDPSession();
   const s = { page, cdp, ffmpeg, frame: null, game: gameId, code, startedAt: Date.now(), frames: 0, written: 0, streamStart: 0, recent: [] };
+  // The web TV follows the host when they switch games (/tv/<game>/<code>). Keep up, and if the new game has a
+  // native screen, hand the room over to it: no video needed any more.
+  page.on("framenavigated", (f) => {
+    if (f !== page.mainFrame() || session !== s) return;
+    const m = f.url().match(/\/tv\/([^/?#]+)\/([A-Z]{6})(?:[?#]|$)/);
+    if (!m || (m[1] === s.game && m[2] === s.code)) return;
+    log("streamed room switched to", m[1], m[2]);
+    s.game = m[1];
+    s.code = m[2];
+    if (NATIVE[m[1]]) adoptNative(m[1], m[2]).catch((e) => log("native handover:", e.message));
+  });
   cdp.on("Page.screencastFrame", async (f) => {
     s.frame = Buffer.from(f.data, "base64");
     s.frames++;
@@ -470,26 +486,33 @@ const fnv = (s) => { let h = 0x811c9dc5; for (let i = 0; i < s.length; i++) { h 
 const avatarColor = (name) => "0x" + AVATAR_COLORS[fnv((name || "").trim().toLowerCase() || "?") % 12].slice(1) + "FF";
 const names = (ps) => (ps.length <= 3 ? ps.map((p) => p.name).join(", ") : `${ps.slice(0, 2).map((p) => p.name).join(", ")} and ${ps.length - 2} more`);
 
-function punchlineScreen(s, room) {
-  const base = { game: "Punchline", color: "0xFFD84AFF", code: room.code, join: `https://dibsgames.com/punchline/game/${room.code}`, now: Date.now() };
-  // The server keeps players in a map (random order); keep join order so avatars don't jump around on the TV.
+// Players in the order they joined (the servers send map or id order), so avatars don't jump around on the TV.
+function joinOrder(s, room) {
   const seen = (room.seen ??= new Map());
   for (const p of s.players || []) if (!seen.has(p.id)) seen.set(p.id, seen.size);
-  const players = [...(s.players || [])].sort((a, b) => seen.get(a.id) - seen.get(b.id))
-    .map((p) => ({ id: p.id, name: p.name, color: avatarColor(p.name), host: p.id === s.hostId, online: p.online !== false, spectator: !!p.spectator, score: p.score || 0 }));
+  return [...(s.players || [])].sort((a, b) => seen.get(a.id) - seen.get(b.id))
+    .map((p) => ({ id: p.id, name: p.name, color: avatarColor(p.name), host: p.id === s.hostId, online: p.online !== false, spectator: !!p.spectator, score: p.score || 0, ready: !!p.ready, voted: !!p.hasVoted }));
+}
+
+function lobbyHint(players, min) {
+  if (!players.length) return "Scan the code to join. Whoever gets in first is the host.";
+  const missing = min - players.filter((p) => p.online).length;
+  if (missing > 0) return `Need ${missing} more player${missing === 1 ? "" : "s"} to start`;
+  return `${players.find((p) => p.host)?.name ?? "The host"} starts the game from their phone`;
+}
+
+const lobbyPlayers = (players) => players.map((p) => ({ name: p.name, color: p.color, host: p.host, away: !p.online }));
+
+function punchlineScreen(s, room) {
+  const base = { game: "Punchline", color: "0xFFD84AFF", code: room.code, join: `https://dibsgames.com/punchline/game/${room.code}`, now: Date.now() };
+  const players = joinOrder(s, room);
   const secs = s.timeRemaining > 0 ? s.timeRemaining : undefined;
   const done = new Set(s.submittedPlayers || []);
   const active = players.filter((p) => !p.spectator && p.online);
   const roster = active.map((p) => ({ name: p.name, color: p.color, done: done.has(p.id) }));
   const pending = active.filter((p) => !done.has(p.id));
   const ph = s.phase;
-  if (ph === "lobby") {
-    const online = players.filter((p) => p.online).length;
-    const host = players.find((p) => p.host);
-    let hint = "Scan the code to join. Whoever gets in first is the host.";
-    if (players.length) hint = online < 3 ? `Need ${3 - online} more player${3 - online === 1 ? "" : "s"} to start` : `${host?.name ?? "The host"} starts the game from their phone`;
-    return { ...base, t: "lobby", players: players.map((p) => ({ name: p.name, color: p.color, host: p.host, away: !p.online })), max: 16, hint };
-  }
+  if (ph === "lobby") return { ...base, t: "lobby", players: lobbyPlayers(players), max: 16, hint: lobbyHint(players, 3) };
   if (/_answer$/.test(ph) || ph === "round1_write_question") {
     const heading = { round1_answer: "Write two funny answers", round2_answer: "Answer your friends' prompts", round3_answer: "Everyone answers the same prompt", round1_write_question: "Write a prompt for round 2" }[ph];
     const kicker = ph === "round3_answer" ? "Final round" : ph === "round1_write_question" ? "Round 2 prep" : `Round ${s.round}`;
@@ -531,7 +554,64 @@ function punchlineScreen(s, room) {
   return null;
 }
 
-const NATIVE = { punchline: { name: "Punchline", create: "/api/create-room", ws: "/ws", translate: punchlineScreen } };
+// Imposter (backend/internal/imposter PlayerView, as a spectator sees it). Dark theme like the web game.
+function imposterScreen(s, room) {
+  const base = { game: "Imposter", color: "0x201539FF", dark: true, code: room.code, join: `https://dibsgames.com/imposter/game/${room.code}`, now: Date.now() };
+  const players = joinOrder(s, room);
+  const inRound = players.filter((p) => !p.spectator);
+  const host = players.find((p) => p.host);
+  const face = (p) => ({ name: p.name, color: avatarColor(p.name) });
+  const ph = s.phase;
+  // Count rounds and remember scores as each one starts, for the reveal's "+100"s and to spin the spotlight once per round.
+  if (ph === "reveal" && room.phase !== "reveal") { room.round = (room.round || 0) + 1; room.before = Object.fromEntries(players.map((p) => [p.id, p.score])); }
+  room.phase = ph;
+  if (ph === "lobby") {
+    const st = s.settings || {};
+    const n = st.numImposters || 1;
+    const cat = !st.category || st.category === "random" ? "Random category" : st.category;
+    const settings = [`${n} imposter${n === 1 ? "" : "s"}`, cat, st.imposterSeesCategory === false ? "Imposters don't see the category" : null].filter(Boolean).join("   ·   ");
+    return { ...base, t: "lobby", players: lobbyPlayers(players), max: 15, hint: lobbyHint(players, 3), settings };
+  }
+  if (ph === "reveal") {
+    const ready = inRound.filter((p) => p.ready).length;
+    return { ...base, t: "stage", kicker: "Secret roles", heading: "Shhh... check your role", body: `${ready} of ${inRound.length} have read their role`, phones: true,
+      players: inRound.map((p) => ({ ...face(p), done: p.ready })) };
+  }
+  if (ph === "discuss") {
+    // Same order the phones show: the server's player list (sorted by id), starting with the starter.
+    const order = (s.players || []).filter((p) => !p.spectator);
+    const i = Math.max(0, order.findIndex((p) => p.id === s.starterId));
+    return { ...base, t: "turns", kicker: "Clue time", heading: "One word each", body: "Go around in this order. Say one word that fits the secret word.",
+      people: [...order.slice(i), ...order.slice(0, i)].map(face), callout: "Give your clues out loud!",
+      note: host ? `${host.name} starts the vote when everyone's gone` : undefined };
+  }
+  if (ph === "vote") {
+    const pending = inRound.filter((p) => !p.voted);
+    return { ...base, t: "stage", kicker: "Vote", heading: "Who's the imposter?", body: pending.length ? `Still voting: ${names(pending)}` : "All votes in!", phones: true,
+      players: inRound.map((p) => ({ ...face(p), done: p.voted })) };
+  }
+  if (ph === "results") {
+    const r = s.results;
+    if (!r) return null;
+    const imps = new Set((r.imposters || []).map((p) => p.id));
+    const before = room.before || {};
+    const rows = [...players].sort((a, b) => b.score - a.score || a.name.localeCompare(b.name))
+      .map((p) => ({ ...face(p), score: p.score, delta: p.score - (before[p.id] ?? p.score) }));
+    return { ...base, t: "unmask", key: `${room.code}-${room.round || 0}`, lead: imps.size > 1 ? "The imposters were..." : "The imposter was...",
+      everyone: inRound.map(face), imposters: (r.imposters || []).map(face), caught: !!r.crewCaught, verdict: r.crewCaught ? "Caught!" : "Got away!",
+      word: r.word, category: r.category,
+      tally: (r.tally || []).map((t) => ({ ...face({ name: t.playerName }), count: t.count, imp: imps.has(t.playerId), voters: t.voters?.length ? `from ${t.voters.join(", ")}` : "" })),
+      rows, note: host ? `Waiting for ${host.name} to start the next round` : undefined };
+  }
+  return null;
+}
+
+const NATIVE = {
+  punchline: { name: "Punchline", create: "/api/create-room", ws: "/ws", translate: punchlineScreen },
+  imposter: { name: "Imposter", create: "/api/imposter/create-room", ws: "/imposter-ws", translate: imposterScreen },
+};
+// Dibs's game ids (in "switch" messages) -> the ids the TV and this streamer use (also the web paths).
+const KEY_FOR_GAME = { quiplash: "punchline", imposter: "imposter", tko: "tee-party", brawl: "brawl", piggyback: "piggyback", pirates: "pirates" };
 const tvs = new Set();
 let nroom = null; // { key, g, code, ws, screen, ping, attempts, dead }
 let lastTv = Date.now();
@@ -559,10 +639,38 @@ async function hostNative(key) {
   const r = await fetch(`${API}${g.create}`, { method: "POST", headers: { "Content-Type": "application/json", Origin: "https://dibsgames.com" }, body: JSON.stringify({ playerName: "TV" }), signal: AbortSignal.timeout(10000) });
   const j = await r.json().catch(() => ({}));
   if (!r.ok || !j.roomCode) throw new Error(j.error || `create-room ${r.status}`);
-  nroom = { key, g, code: j.roomCode, ws: null, screen: null, attempts: 0, dead: false };
+  await adoptNative(key, j.roomCode);
+}
+
+// Watch an existing room as the TV's native screen (a new one, or one the host switched games into).
+async function adoptNative(key, code) {
+  const g = NATIVE[key];
+  if (!g) throw new Error(`no native screen for "${key}"`);
+  closeNative();
+  await stop();
+  nroom = { key, g, code, ws: null, screen: null, attempts: 0, dead: false };
   connectNative(nroom);
-  tvSend({ t: "room", game: key, code: nroom.code });
-  log("native", g.name, "room", nroom.code);
+  tvSend({ t: "room", game: key, code });
+  log("native", g.name, "room", code);
+}
+
+// The host took the room to another game ("switch" message): follow it, natively if we can, else as video.
+async function followSwitch(mv) {
+  const key = KEY_FOR_GAME[mv?.game];
+  const code = typeof mv?.roomCode === "string" && /^[A-Z]{6}$/.test(mv.roomCode) ? mv.roomCode : null;
+  if (!key || !code) { closeNative(); tvSend({ t: "ended", text: "That room closed" }); return; }
+  const label = GAMES[key] || mv.name || "a new game";
+  log("native room switched to", key, code);
+  tvSend({ t: "status", text: `Next up: ${label}` });
+  if (NATIVE[key]) return adoptNative(key, code);
+  closeNative();
+  try {
+    const r = await start(key, code);
+    tvSend({ t: "stream", game: key, code: r.code, hls: r.hls });
+  } catch (e) {
+    log("switch to video:", e.message);
+    tvSend({ t: "ended", text: `Couldn't show ${label}` });
+  }
 }
 
 function connectNative(room) {
@@ -579,6 +687,10 @@ function connectNative(room) {
     if (msg.type === "game_state") {
       const screen = room.g.translate(msg.payload, room);
       if (screen && nroom === room) { room.screen = screen; tvSend(screen); }
+    } else if (msg.type === "switch") {
+      room.dead = true;
+      try { ws.close(); } catch {}
+      if (nroom === room) followSwitch(msg.payload).catch((e) => log("switch:", e.message));
     } else if (msg.type === "closed" || msg.type === "error") {
       room.dead = true;
       if (nroom === room) {

@@ -47,7 +47,7 @@
     <Timer id="poll" duration="30" repeat="true" />
     <Timer id="stallTimer" duration="2" repeat="false" />
     <Timer id="stuckTimer" duration="10" repeat="false" />
-    <Timer id="demoTimer" duration="5" repeat="true" />
+    <Timer id="demoTimer" duration="7" repeat="true" />
     <Timer id="nativeTimer" duration="20" repeat="false" />
     <Animation id="pop" duration="0.3" easeFunction="outCubic">
       <FloatFieldInterpolator key="[0,1]" keyValue="[0,1]" fieldToInterp="body.opacity" />

@@ -15,9 +15,10 @@
   <script type="text/brightscript" uri="lib/util.brs" />
   <children>
     <Rectangle id="bg" width="1920" height="1080" color="0xFFC93CFF" />
-    <Poster uri="pkg:/images/dibs_dots.png" width="1920" height="1080" blendColor="0x221836FF" />
+    <Poster id="dots" uri="pkg:/images/dibs_dots.png" width="1920" height="1080" blendColor="0x221836FF" />
     <Group id="view" />
     <Group id="chip" visible="false" />
     <Timer id="tick" duration="0.25" repeat="true" />
+    <Timer id="spin" duration="0.5" repeat="false" />
   </children>
 </component>

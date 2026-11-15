@@ -81,6 +81,7 @@ sub onStreamer()
     if m.top.streamer <> ""
         pollStatus()
         t.control = "start"
+        ensureBridge() ' stay in touch so the home Mac can hand a streamed room over to the native screen
         if m.pendingStart <> invalid ' a deep link arrived before the home Mac was found
             m.top.autostart = m.pendingStart
             m.pendingStart = invalid
@@ -179,6 +180,7 @@ sub renderPick()
     else
         hint.text = "OK  host it on this TV      " + Chr(183) + "      Replay key  close"
         note.text = "The TV shows the room; everyone plays on their phones. It runs a few seconds behind the phones."
+        if NativeGames().DoesExist(m.GAMES[m.focus].id) then note.text = "The TV shows the room; everyone plays on their phones. The TV draws this one itself, so it keeps up."
         if live then note.text = "Hosting a new game ends the " + m.liveInfo.name + " room."
     end if
     moveRing(false)
@@ -218,7 +220,7 @@ end sub
 ' ---- native TV screen (no video: the TV draws the room itself) --------------------------------
 ' Games the bridge can translate into native screens. Everything else uses the video stream.
 function NativeGames() as Object
-    return { punchline: true }
+    return { punchline: true, imposter: true }
 end function
 
 function BridgeHost() as String
@@ -289,6 +291,23 @@ sub onBridgeMessage()
         showStatus(text, 6)
     else if t = "room"
         setLive({ id: msg.game, name: GameName(msg.game), code: msg.code, mode: "native" })
+        if m.mode = "playing" ' the host switched a streamed room to a game the TV draws itself
+            m.expectStop = true
+            m.video.control = "stop"
+            m.video.visible = false
+            m.top.findNode("stallTimer").control = "stop"
+            m.top.findNode("stuckTimer").control = "stop"
+            keepAwake(true)
+            m.lastScreen = invalid
+            m.native.screen = { t: "message", game: GameName(msg.game), title: "Next up: " + GameName(msg.game), body: "Room " + msg.code }
+            setMode("native")
+            m.top.setFocus(true)
+        end if
+    else if t = "stream"
+        ' The host switched a native room to a game the TV can only show as video.
+        setLive({ id: msg.game, name: GameName(msg.game), code: msg.code, mode: "stream" })
+        m.lastScreen = invalid
+        if m.mode = "native" or m.mode = "starting" then play(msg.hls)
     else if t = "ended"
         setLive(invalid)
         m.lastScreen = invalid
@@ -310,8 +329,8 @@ sub onBridgeMessage()
 end sub
 
 ' Deep link dibs=demo: cycle sample screens (for checking the look without a real room).
-sub startDemo()
-    m.demo = DemoScreens()
+sub startDemo(which as String)
+    m.demo = DemoScreens(which)
     m.demoIndex = 0
     setMode("native")
     m.native.screen = m.demo[0]
@@ -335,9 +354,10 @@ function With(a as Object, b as Object) as Object
     return r
 end function
 
-function DemoScreens() as Object
+function DemoScreens(which as String) as Object
     dt = CreateObject("roDateTime")
     now = CDbl(dt.AsSeconds()) * CDbl(1000)
+    if which = "demo-imposter" then return ImposterDemo(now)
     b = { game: "Punchline", color: "0xFFC93CFF", code: "DEMOAB", join: "https://dibsgames.com/punchline/game/DEMOAB", now: now }
     tony = { name: "Tony", color: "0x2DD4A0FF", host: true }
     maya = { name: "Maya", color: "0xFF7AC6FF" }
@@ -354,12 +374,28 @@ function DemoScreens() as Object
     ]
 end function
 
+function ImposterDemo(now as Double) as Object
+    b = { game: "Imposter", color: "0x201539FF", dark: true, code: "DEMOCD", join: "https://dibsgames.com/imposter/game/DEMOCD", now: now }
+    tony = { name: "Tony", color: "0x2DD4A0FF" }
+    maya = { name: "Maya", color: "0xFF7AC6FF" }
+    sam = { name: "Sam", color: "0x47B5FFFF" }
+    lee = { name: "Lee", color: "0xFF6B57FF" }
+    dot = Chr(183)
+    return [
+        With(b, { t: "lobby", players: [With(tony, { host: true }), maya, sam, lee], max: 15, hint: "Tony starts the game from their phone", settings: "1 imposter   " + dot + "   Animals" })
+        With(b, { t: "stage", kicker: "Secret roles", heading: "Shhh... check your role", body: "2 of 4 have read their role", phones: true, players: [With(tony, { done: true }), maya, With(sam, { done: true }), lee] })
+        With(b, { t: "turns", kicker: "Clue time", heading: "One word each", body: "Go around in this order. Say one word that fits the secret word.", people: [sam, lee, tony, maya], callout: "Give your clues out loud!", note: "Tony starts the vote when everyone" + Chr(8217) + "s gone" })
+        With(b, { t: "stage", kicker: "Vote", heading: "Who" + Chr(8217) + "s the imposter?", body: "Still voting: Maya, Lee", phones: true, players: [With(tony, { done: true }), maya, With(sam, { done: true }), lee] })
+        With(b, { t: "unmask", key: "demo-1", lead: "The imposter was...", everyone: [tony, maya, sam, lee], imposters: [lee], caught: true, verdict: "Caught!", word: "Penguin", category: "Animals", tally: [With(lee, { count: 3, imp: true, voters: "from Tony, Maya, Sam" }), With(sam, { count: 1, voters: "from Lee" }), With(tony, { count: 0, voters: "" }), With(maya, { count: 0, voters: "" })], rows: [With(tony, { score: 300, delta: 100 }), With(maya, { score: 200, delta: 100 }), With(sam, { score: 200, delta: 100 }), With(lee, { score: 100 })], note: "Waiting for Tony to start the next round" })
+    ]
+end function
+
 ' ---- hosting through the streamer ------------------------------------------------------------
 
 ' Deep link: host this game straight away (game id as on the streamer, e.g. "punchline").
 sub onAutostart()
-    if m.top.autostart = "demo"
-        startDemo()
+    if Left(m.top.autostart, 4) = "demo"
+        startDemo(m.top.autostart)
         return
     end if
     if m.top.streamer = ""
