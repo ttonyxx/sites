@@ -35,7 +35,10 @@ const CHROME = process.env.CHROME_PATH || firstExisting(
 const FFMPEG = process.env.FFMPEG_PATH || firstExisting("/opt/homebrew/bin/ffmpeg", "/usr/local/bin/ffmpeg", "/usr/bin/ffmpeg") || "ffmpeg";
 // TVs find the streamer on the LAN by sending an SSDP M-SEARCH for this service type.
 const SSDP_ST = "urn:tonyxin-com:service:dibs-tv-streamer:1";
-const FPS = Number(process.env.FPS || 30);
+const FPS = Number(process.env.FPS || 24);
+// Video bitrate (kbit/s). Both the streamer Mac and the TV are often on Wi-Fi, where ~3 Mbps of fast 3D
+// motion stalls the TV; Dibs's flat cartoon art still looks clean at this rate.
+const KBPS = Number(process.env.KBPS || 1600);
 // Encoders left behind by an earlier run (crash, reinstall) write into an old dibs-live-* folder; stop them.
 try {
   const orphans = (await new Promise((resolve) => {
@@ -49,7 +52,7 @@ try {
   if (orphans.length) console.log(`stopped ${orphans.length} leftover encoder(s)`);
 } catch {}
 const LIVE = fs.mkdtempSync(path.join(os.tmpdir(), "dibs-live-"));
-const VERSION = "2026-11-14.6";
+const VERSION = "2026-11-14.7";
 // Stream size. The page still renders at 1920x1080 (the TV layout Dibs expects); the capture is scaled down.
 // 720p is plenty for Dibs's big type and halves the work per frame on a busy Mac. OUT=1080 for full HD.
 const OUT_H = Number(process.env.OUT || 720);
@@ -81,6 +84,7 @@ setInterval(() => {
 }, 10000);
 
 const LOG = [];
+const DELIVERIES = [];
 const log = (...a) => {
   const line = [new Date().toISOString().slice(11, 19), ...a].join(" ");
   console.log(line);
@@ -182,10 +186,10 @@ async function start(gameId) {
     "-f", "image2pipe", "-framerate", String(FPS), "-i", "-",
     "-f", "lavfi", "-i", "anullsrc=r=48000:cl=stereo",
     "-map", "0:v", "-map", "1:a",
-    "-c:v", "libx264", "-preset", "veryfast", "-tune", "zerolatency", "-profile:v", "main", "-pix_fmt", "yuv420p",
+    "-c:v", "libx264", "-preset", "veryfast", "-profile:v", "main", "-pix_fmt", "yuv420p",
     "-r", String(FPS), "-g", String(FPS * 2), "-keyint_min", String(FPS * 2), "-sc_threshold", "0",
     "-vf", `scale=${OUT_W}:${OUT_H}:flags=bicubic`,
-    "-b:v", OUT_H > 720 ? "5M" : "3M", "-maxrate", OUT_H > 720 ? "6M" : "3.6M", "-bufsize", "2M",
+    "-b:v", `${KBPS}k`, "-maxrate", `${Math.round(KBPS * 1.25)}k`, "-bufsize", `${KBPS * 2}k`,
     "-c:a", "aac", "-b:a", "64k",
     // 2 s segments and a 20 s window: Roku's live player rebuffers (black) with 1 s segments over Wi-Fi.
     // temp_file makes playlist/segment writes atomic so the TV never reads a half-written playlist.
@@ -265,6 +269,11 @@ http
           d.behindSeconds = +(d.wallSeconds - d.streamSeconds).toFixed(1);
           d.encoderBacklogMB = +(s.ffmpeg.stdin.writableLength / 1048576).toFixed(1);
           d.resolution = `${OUT_W}x${OUT_H}`;
+          d.kbps = KBPS;
+          d.fps = FPS;
+          const recent = DELIVERIES.slice(-10);
+          d.deliveries = recent;
+          if (recent.length) d.avgSegmentMs = Math.round(recent.reduce((a, x) => a + x.ms, 0) / recent.length);
           d.segments = fs.readdirSync(LIVE).filter((f) => f.endsWith(".ts")).length;
           d.webgl = await s.page.evaluate(() => {
             const gl = document.createElement("canvas").getContext("webgl2");
@@ -301,7 +310,19 @@ http
         lastHit = Date.now();
         const file = path.join(LIVE, path.basename(url.pathname));
         if (!fs.existsSync(file)) return json(404, { error: "not ready" });
-        res.writeHead(200, { "Content-Type": TYPES[path.extname(file)] || "application/octet-stream", "Cache-Control": "no-store", "Access-Control-Allow-Origin": "*" });
+        const bytes = fs.statSync(file).size;
+        res.writeHead(200, { "Content-Type": TYPES[path.extname(file)] || "application/octet-stream", "Content-Length": bytes, "Cache-Control": "no-store", "Access-Control-Allow-Origin": "*" });
+        if (file.endsWith(".ts")) {
+          // Record how fast each segment reaches the viewer: slower than its 2 s of video means the TV will stall.
+          const t = Date.now();
+          const ip = (req.socket.remoteAddress || "").replace(/^::ffff:/, "");
+          res.on("finish", () => {
+            const ms = Date.now() - t;
+            DELIVERIES.push({ seg: path.basename(file), kb: Math.round(bytes / 1024), ms, ip });
+            if (DELIVERIES.length > 30) DELIVERIES.shift();
+            if (ms > 1500) log(`slow segment to ${ip}: ${Math.round(bytes / 1024)} KB took ${ms} ms`);
+          });
+        }
         return fs.createReadStream(file).pipe(res);
       }
       json(404, { error: "not found" });
