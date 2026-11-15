@@ -10,6 +10,7 @@
   <script type="text/brightscript" uri="lib/weather.brs" />
   <script type="text/brightscript" uri="lib/prefs.brs" />
   <children>
+    <Video id="keepAwake" width="16" height="9" enableUI="false" loop="true" />
     <Sky id="sky" />
     <Photos id="photos" />
     <Poster id="scrim" uri="pkg:/images/scrim.png" width="1920" height="1080" />

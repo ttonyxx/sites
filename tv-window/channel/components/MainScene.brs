@@ -104,6 +104,7 @@ sub init()
     fetchWeather()
     showHints()
     m.top.setFocus(true)
+    startKeepAwake()
     m.top.signalBeacon("AppLaunchComplete") ' tells Roku OS the UI is ready
 end sub
 
@@ -641,8 +642,20 @@ end sub
 
 ' ---- screensaver -------------------------------------------------------------------------------
 
+' A tiny, silent, looping black video under everything: the Roku screensaver doesn't start while video
+' plays, so Window stays on screen. (Dibs streams pause it; the screensaver instance doesn't need it.)
+sub startKeepAwake()
+    v = m.top.findNode("keepAwake")
+    c = CreateObject("roSGNode", "ContentNode")
+    c.url = "pkg:/media/keepawake.mp4"
+    c.streamFormat = "mp4"
+    v.content = c
+    v.control = "play"
+end sub
+
 sub onScreensaverSet()
     if not m.top.screensaver then return
+    m.top.findNode("keepAwake").control = "stop"
     m.top.findNode("hints").visible = false
     m.top.findNode("toast").visible = false
     m.top.findNode("dock").visible = false

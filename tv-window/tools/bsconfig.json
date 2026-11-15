@@ -1,6 +1,6 @@
 {
   "rootDir": "../channel",
-  "files": ["manifest", "source/**/*", "components/**/*", "images/**/*", "fonts/**/*"],
+  "files": ["manifest", "source/**/*", "components/**/*", "images/**/*", "fonts/**/*", "media/**/*"],
   "stagingDir": "dist/staging",
   "retainStagingDir": false,
   "createPackage": false,

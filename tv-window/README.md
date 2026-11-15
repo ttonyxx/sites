@@ -27,7 +27,10 @@ the TV into an ambient dashboard:
   LIVE, and "Back to <game>" returns to it, even after you leave Window for up to 15 minutes. ✱ on
   that button ends the room. See *Hosting Dibs on the TV* below. Without a streamer, the tile shows
   AirPlay instructions instead.
-- **Screensaver:** Window is also a Roku screensaver, so it can appear whenever the TV is idle.
+- **Stays on screen:** while Window is open it loops a tiny silent video, so the Roku screensaver never
+  starts. The home streamer also opens Window when the TV turns on, or after it sits on the Roku home
+  screen or screensaver for 3 minutes (`AUTO_OPEN=0` / `HOME_IDLE_MINUTES` on the streamer).
+- **Screensaver:** Window is also a Roku screensaver (Settings › Theme › Screensavers), as a fallback.
 
 This folder is not a website. It has no `index.html` or top-level `package.json`, so
 `scripts/build-sites.mjs` skips it.
