@@ -1,0 +1,11 @@
+{
+  "name": "dibs-tv-streamer",
+  "private": true,
+  "type": "module",
+  "description": "Dibs TV streamer + native-TV bridge for the Window Roku channel (installed by install-mac.sh).",
+  "dependencies": {
+    "puppeteer-core": "^25.17.0",
+    "qrcode": "^1.5.4",
+    "ws": "^8.18.0"
+  }
+}

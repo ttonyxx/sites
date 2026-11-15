@@ -60,6 +60,10 @@ alphaMask("glow.png", 512, 512, (x, y) => {
 // Soft horizontal edge (opaque -> clear), used where the info panel meets the photos.
 alphaMask("fade_h.png", 256, 8, (x) => Math.pow(1 - x / 255, 1.8));
 
+// Native Dibs screen: a soft-edged circle (avatars, timer) and a faint dot grid like dibsgames.com's.
+alphaMask("dot.png", 128, 128, (x, y) => clamp(63.5 - Math.hypot(x - 63.5, y - 63.5) + 0.5));
+alphaMask("dibs_dots.png", 1920, 1080, (x, y) => 0.12 * clamp(2.4 - Math.hypot((x % 28) - 14, (y % 28) - 14)));
+
 // Legibility scrim: darkens the left (clock) and bottom (forecast) of the screen.
 {
   const w = 960, h = 540, px = new Uint8Array(w * h * 4);
@@ -199,6 +203,16 @@ for (const [src, dst] of [
   ["600SemiBold/Nunito_600SemiBold.ttf", "Nunito-SemiBold.ttf"],
 ]) fs.copyFileSync(path.join(NUNITO, src), path.join(FONTS, dst));
 fs.copyFileSync(path.join(NUNITO, "LICENSE_FONT"), path.join(FONTS, "OFL.txt"));
+// Dibs's own type for the native Dibs TV screen: Bricolage Grotesque (display) + DM Sans (text).
+const GF = path.join(TOOLS, "node_modules/@expo-google-fonts");
+for (const [src, dst] of [
+  ["bricolage-grotesque/800ExtraBold/BricolageGrotesque_800ExtraBold.ttf", "Dibs-Display-ExtraBold.ttf"],
+  ["bricolage-grotesque/700Bold/BricolageGrotesque_700Bold.ttf", "Dibs-Display-Bold.ttf"],
+  ["dm-sans/400Regular/DMSans_400Regular.ttf", "Dibs-Text-Regular.ttf"],
+  ["dm-sans/700Bold/DMSans_700Bold.ttf", "Dibs-Text-Bold.ttf"],
+]) fs.copyFileSync(path.join(GF, src), path.join(FONTS, dst));
+fs.copyFileSync(path.join(GF, "bricolage-grotesque/LICENSE_FONT"), path.join(FONTS, "OFL-BricolageGrotesque.txt"));
+fs.copyFileSync(path.join(GF, "dm-sans/LICENSE_FONT"), path.join(FONTS, "OFL-DMSans.txt"));
 console.log("  fonts: Nunito ExtraLight / Light / Regular / SemiBold (SIL OFL 1.1)");
 
 // --- Vector art via headless Chrome ------------------------------------------------------

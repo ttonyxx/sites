@@ -52,6 +52,11 @@ sub init()
     m.top.findNode("poll").observeField("fire", "pollStatus")
     m.top.findNode("stallTimer").observeField("fire", "onStall")
     m.top.findNode("stuckTimer").observeField("fire", "onStuck")
+    m.native = m.top.findNode("native")
+    m.bridge = invalid
+    m.lastScreen = invalid
+    m.demo = invalid
+    m.top.findNode("demoTimer").observeField("fire", "onDemoTick")
     m.expectStop = false
     m.catchingUp = false
     m.retries = 0
@@ -69,6 +74,7 @@ end sub
 ' ---- streamer status (also keeps a parked room alive) -------------------------------------------
 
 sub onStreamer()
+    m.native.base = m.top.streamer
     t = m.top.findNode("poll")
     t.control = "stop"
     if m.top.streamer <> ""
@@ -91,8 +97,9 @@ sub onStatus()
     info = invalid
     if r.ok
         if r.data.running = true and r.data.game <> invalid
-            info = { id: r.data.game, name: GameName(r.data.game), code: "" }
+            info = { id: r.data.game, name: GameName(r.data.game), code: "", mode: "stream" }
             if r.data.code <> invalid then info.code = r.data.code
+            if r.data.mode <> invalid then info.mode = r.data.mode
         end if
     end if
     setLive(info)
@@ -137,7 +144,8 @@ sub setMode(mode as String)
     m.mode = mode
     m.top.findNode("cardMode").visible = mode = "card"
     m.top.findNode("pickMode").visible = mode = "pick" or mode = "starting"
-    m.top.findNode("dim").visible = mode <> "playing"
+    m.top.findNode("dim").visible = mode <> "playing" and mode <> "native"
+    m.native.visible = mode = "native"
     if mode = "pick" then renderPick()
 end sub
 
@@ -195,17 +203,150 @@ end sub
 sub closePanel()
     if not m.top.visible then return
     if m.mode = "starting" then stopRoom()
-    if m.mode = "playing" then parkGame(false)
+    if m.mode = "playing" or m.mode = "native" then parkGame(false)
     m.autoClose.control = "stop"
     m.top.open = false
     m.top.visible = false
     m.top.closed = true
 end sub
 
+' ---- native TV screen (no video: the TV draws the room itself) --------------------------------
+' Games the bridge can translate into native screens. Everything else uses the video stream.
+function NativeGames() as Object
+    return { punchline: true }
+end function
+
+function BridgeHost() as String
+    h = m.top.streamer.Replace("http://", "").Replace("https://", "")
+    i = Instr(1, h, ":")
+    if i > 0 then h = Left(h, i - 1)
+    return h + ":8791"
+end function
+
+sub ensureBridge()
+    if m.bridge <> invalid then return
+    m.bridge = CreateObject("roSGNode", "BridgeTask")
+    m.bridge.host = BridgeHost()
+    m.bridge.observeField("message", "onBridgeMessage")
+    m.bridge.observeField("connected", "onBridgeConnected")
+    m.bridge.control = "RUN"
+end sub
+
+sub bridgeSend(obj as Object)
+    ensureBridge()
+    m.bridge.send = FormatJson(obj)
+end sub
+
+sub onBridgeConnected()
+    ' After a reconnect, ask for the current screen of a running native room.
+    if m.bridge.connected and m.liveInfo <> invalid
+        if m.liveInfo.mode = "native" then bridgeSend({ op: "resume" })
+    end if
+end sub
+
+sub startNative(game as Object)
+    m.autoClose.control = "stop"
+    setMode("starting")
+    showStatus("Setting up " + game.name + Chr(8230), 0)
+    bridgeSend({ op: "host", game: game.id })
+end sub
+
+sub resumeNative()
+    m.autoClose.control = "stop"
+    setMode("native")
+    if m.lastScreen <> invalid then m.native.screen = m.lastScreen
+    bridgeSend({ op: "resume" })
+    m.top.setFocus(true)
+end sub
+
+sub onBridgeMessage()
+    msg = m.bridge.message
+    if msg = invalid or msg.t = invalid then return
+    t = msg.t
+    if t = "status"
+        if msg.text <> invalid then showStatus(msg.text, 4)
+    else if t = "error"
+        text = "Dibs had a problem"
+        if msg.text <> invalid then text = msg.text
+        if m.mode = "starting"
+            setMode("pick")
+            m.autoClose.control = "start"
+        end if
+        showStatus(text, 6)
+    else if t = "room"
+        setLive({ id: msg.game, name: GameName(msg.game), code: msg.code, mode: "native" })
+    else if t = "ended"
+        setLive(invalid)
+        m.lastScreen = invalid
+        if m.mode = "native"
+            setMode("pick")
+            m.autoClose.control = "start"
+        end if
+        if msg.text <> invalid then showStatus(msg.text, 6)
+    else
+        m.lastScreen = msg
+        if m.mode = "starting"
+            setMode("native")
+            hideStatus()
+            m.top.setFocus(true)
+        end if
+        if m.mode = "native" then m.native.screen = msg
+    end if
+end sub
+
+' Deep link dibs=demo: cycle sample screens (for checking the look without a real room).
+sub startDemo()
+    m.demo = DemoScreens()
+    m.demoIndex = 0
+    setMode("native")
+    m.native.screen = m.demo[0]
+    m.top.findNode("demoTimer").control = "start"
+    m.top.setFocus(true)
+end sub
+
+sub onDemoTick()
+    if m.mode <> "native" or m.demo = invalid
+        m.top.findNode("demoTimer").control = "stop"
+        return
+    end if
+    m.demoIndex = (m.demoIndex + 1) mod m.demo.Count()
+    m.native.screen = m.demo[m.demoIndex]
+end sub
+
+function With(a as Object, b as Object) as Object
+    r = {}
+    r.Append(a)
+    r.Append(b)
+    return r
+end function
+
+function DemoScreens() as Object
+    dt = CreateObject("roDateTime")
+    now = CDbl(dt.AsSeconds()) * CDbl(1000)
+    b = { game: "Punchline", color: "0xFFC93CFF", code: "DEMOAB", join: "https://dibsgames.com/punchline/game/DEMOAB", now: now }
+    tony = { name: "Tony", color: "0x2DD4A0FF", host: true }
+    maya = { name: "Maya", color: "0xFF7AC6FF" }
+    sam = { name: "Sam", color: "0x47B5FFFF" }
+    lee = { name: "Lee", color: "0xFF6B57FF" }
+    return [
+        With(b, { t: "lobby", players: [tony, maya, sam, lee], max: 16, hint: "Tony starts the game from their phone", settings: "3 rounds" })
+        With(b, { t: "stage", kicker: "Round 1", heading: "Answer your prompts", body: "Two prompts each. Funny beats true.", phones: true, secs: 75, players: [With(tony, { done: true }), maya, With(sam, { done: true }), lee] })
+        With(b, { t: "matchup", kicker: "Vote 1 of 4", prompt: "The worst thing to hear your pilot say", byline: "Written by Maya", note: "1 of 2 votes in", answers: [{ text: "Anyone know where the brakes are?" }, { text: "Hold my coffee" }], secs: 20 })
+        With(b, { t: "matchup", kicker: "Result 1 of 4", prompt: "The worst thing to hear your pilot say", reveal: true, note: "Sam takes it!", answers: [{ text: "Anyone know where the brakes are?", author: "Maya", votes: 1, points: 100 }, { text: "Hold my coffee", author: "Sam", votes: 3, points: 300, winner: true }] })
+        With(b, { t: "list", kicker: "Final round " + Chr(183) + " Pick your top 3", prompt: "The worst ice cream flavor", phones: true, secs: 90, note: "Still picking: Maya, Lee", items: [{ text: "Toothpaste swirl" }, { text: "Tuesday" }, { text: "Gas station sushi" }, { text: "Wet dog" }] })
+        With(b, { t: "list", kicker: "Final round " + Chr(183) + " Results", prompt: "The worst ice cream flavor", reveal: true, items: [{ text: "Gas station sushi", author: "Lee", color: "0xFF6B57FF", points: 500, place: 1 }, { text: "Toothpaste swirl", author: "Sam", color: "0x47B5FFFF", points: 300, place: 2 }, { text: "Wet dog", author: "Maya", color: "0xFF7AC6FF", points: 200, place: 3 }, { text: "Tuesday", author: "Tony", color: "0x2DD4A0FF", points: 0, place: 4 }] })
+        With(b, { t: "scores", title: "Sam wins!", final: true, note: "Waiting for Tony to start a new game", rows: [With(sam, { score: 900, delta: 300 }), With(maya, { score: 600, delta: 200 }), With(lee, { score: 600, delta: 500 }), With(tony, { score: 300 })] })
+    ]
+end function
+
 ' ---- hosting through the streamer ------------------------------------------------------------
 
 ' Deep link: host this game straight away (game id as on the streamer, e.g. "punchline").
 sub onAutostart()
+    if m.top.autostart = "demo"
+        startDemo()
+        return
+    end if
     if m.top.streamer = "" then return
     for i = 0 to m.GAMES.Count() - 1
         if m.GAMES[i].id = m.top.autostart then m.focus = i
@@ -220,6 +361,10 @@ sub startGame()
             resumeGame()
             return
         end if
+    end if
+    if NativeGames().DoesExist(game.id)
+        startNative(game)
+        return
     end if
     m.autoClose.control = "stop"
     setMode("starting")
@@ -252,6 +397,13 @@ sub onStarted()
 end sub
 
 sub resumeGame()
+    if m.liveInfo <> invalid
+        if m.liveInfo.mode = "native"
+            resumeNative()
+            showStatus("Back to " + m.liveInfo.name, 3)
+            return
+        end if
+    end if
     m.autoClose.control = "stop"
     play("/live/index.m3u8")
     showStatus("Back to " + m.liveInfo.name, 3)
@@ -330,6 +482,8 @@ end sub
 
 ' Leave the stream but keep the room running; the dock's Dibs tile and "Back to" button return to it.
 sub parkGame(closeAfter as Boolean)
+    m.native.visible = false
+    m.top.findNode("demoTimer").control = "stop"
     m.expectStop = true
     m.video.control = "stop"
     m.video.visible = false
@@ -348,6 +502,8 @@ sub parkGame(closeAfter as Boolean)
 end sub
 
 sub stopRoom()
+    if m.bridge <> invalid then bridgeSend({ op: "leave" })
+    m.lastScreen = invalid
     m.expectStop = true
     m.video.control = "stop"
     m.video.visible = false
@@ -425,7 +581,7 @@ function onKeyEvent(key as String, press as Boolean) as Boolean
             setMode("pick")
             hideStatus()
         end if
-    else if m.mode = "playing"
+    else if m.mode = "playing" or m.mode = "native"
         if leave or key = "options"
             parkGame(true)
         else

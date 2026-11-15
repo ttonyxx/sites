@@ -36,6 +36,7 @@
         <Label id="pickNote" translation="[260,958]" width="1400" horizAlign="center" />
       </Group>
     </Group>
+    <DibsNative id="native" visible="false" />
     <Video id="video" width="1920" height="1080" visible="false" enableUI="false" />
     <Group id="status" visible="false">
       <Poster id="statusBg" uri="pkg:/images/pill.9.png" height="84" blendColor="0x221836FF" opacity="0.92" />
@@ -46,6 +47,7 @@
     <Timer id="poll" duration="30" repeat="true" />
     <Timer id="stallTimer" duration="2" repeat="false" />
     <Timer id="stuckTimer" duration="10" repeat="false" />
+    <Timer id="demoTimer" duration="5" repeat="true" />
     <Animation id="pop" duration="0.3" easeFunction="outCubic">
       <FloatFieldInterpolator key="[0,1]" keyValue="[0,1]" fieldToInterp="body.opacity" />
       <Vector2DFieldInterpolator key="[0,1]" keyValue="[[0,30],[0,0]]" fieldToInterp="body.translation" />
