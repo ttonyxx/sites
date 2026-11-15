@@ -650,7 +650,12 @@ sub startKeepAwake()
     c.url = "pkg:/media/keepawake.mp4"
     c.streamFormat = "mp4"
     v.content = c
+    v.observeField("state", "onKeepAwakeState")
     v.control = "play"
+end sub
+
+sub onKeepAwakeState()
+    print "[window] keep-awake video "; m.top.findNode("keepAwake").state
 end sub
 
 sub onScreensaverSet()
