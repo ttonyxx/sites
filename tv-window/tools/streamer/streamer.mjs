@@ -39,6 +39,7 @@ const FPS = Number(process.env.FPS || 24);
 // Video bitrate (kbit/s). Both the streamer Mac and the TV are often on Wi-Fi, where ~3 Mbps of fast 3D
 // motion stalls the TV; Dibs's flat cartoon art still looks clean at this rate.
 const KBPS = Number(process.env.KBPS || 1600);
+const SEG_S = Number(process.env.SEGMENT || 1);
 // Encoders left behind by an earlier run (crash, reinstall) write into an old dibs-live-* folder; stop them.
 try {
   const orphans = (await new Promise((resolve) => {
@@ -52,7 +53,7 @@ try {
   if (orphans.length) console.log(`stopped ${orphans.length} leftover encoder(s)`);
 } catch {}
 const LIVE = fs.mkdtempSync(path.join(os.tmpdir(), "dibs-live-"));
-const VERSION = "2026-11-14.7";
+const VERSION = "2026-11-14.8";
 // Stream size. The page still renders at 1920x1080 (the TV layout Dibs expects); the capture is scaled down.
 // 720p is plenty for Dibs's big type and halves the work per frame on a busy Mac. OUT=1080 for full HD.
 const OUT_H = Number(process.env.OUT || 720);
@@ -186,14 +187,18 @@ async function start(gameId) {
     "-f", "image2pipe", "-framerate", String(FPS), "-i", "-",
     "-f", "lavfi", "-i", "anullsrc=r=48000:cl=stereo",
     "-map", "0:v", "-map", "1:a",
-    "-c:v", "libx264", "-preset", "veryfast", "-profile:v", "main", "-pix_fmt", "yuv420p",
-    "-r", String(FPS), "-g", String(FPS * 2), "-keyint_min", String(FPS * 2), "-sc_threshold", "0",
+    // macOS: the hardware encoder (VideoToolbox) leaves the CPU free for Chrome, so capture runs smoother.
+    ...(process.platform === "darwin" && process.env.SOFTWARE_ENCODER !== "1"
+      ? ["-c:v", "h264_videotoolbox", "-realtime", "1", "-allow_sw", "1", "-profile:v", "main"]
+      : ["-c:v", "libx264", "-preset", "veryfast", "-profile:v", "main"]),
+    "-pix_fmt", "yuv420p",
+    "-r", String(FPS), "-g", String(FPS * SEG_S), "-keyint_min", String(FPS * SEG_S), "-sc_threshold", "0",
     "-vf", `scale=${OUT_W}:${OUT_H}:flags=bicubic`,
     "-b:v", `${KBPS}k`, "-maxrate", `${Math.round(KBPS * 1.25)}k`, "-bufsize", `${KBPS * 2}k`,
     "-c:a", "aac", "-b:a", "64k",
-    // 2 s segments and a 20 s window: Roku's live player rebuffers (black) with 1 s segments over Wi-Fi.
-    // temp_file makes playlist/segment writes atomic so the TV never reads a half-written playlist.
-    "-f", "hls", "-hls_time", "2", "-hls_list_size", "10", "-hls_delete_threshold", "10",
+    // The TV's player starts ~3 segments behind live, so the segment length sets the delay. At ~1.6 Mbps,
+    // 1 s segments play steadily over Wi-Fi (SEGMENT=2 if a TV stalls). temp_file makes writes atomic.
+    "-f", "hls", "-hls_time", String(SEG_S), "-hls_list_size", String(Math.ceil(20 / SEG_S)), "-hls_delete_threshold", String(Math.ceil(20 / SEG_S)),
     "-hls_flags", "delete_segments+independent_segments+omit_endlist+temp_file",
     path.join(LIVE, "index.m3u8"),
   ], { stdio: ["pipe", "inherit", "inherit"] });
