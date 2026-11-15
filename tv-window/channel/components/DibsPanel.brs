@@ -57,6 +57,7 @@ sub init()
     m.lastScreen = invalid
     m.demo = invalid
     m.top.findNode("demoTimer").observeField("fire", "onDemoTick")
+    m.top.findNode("nativeTimer").observeField("fire", "onNativeTimeout")
     m.expectStop = false
     m.catchingUp = false
     m.retries = 0
@@ -80,6 +81,10 @@ sub onStreamer()
     if m.top.streamer <> ""
         pollStatus()
         t.control = "start"
+        if m.pendingStart <> invalid ' a deep link arrived before the home Mac was found
+            m.top.autostart = m.pendingStart
+            m.pendingStart = invalid
+        end if
     end if
 end sub
 
@@ -248,7 +253,15 @@ sub startNative(game as Object)
     m.autoClose.control = "stop"
     setMode("starting")
     showStatus("Setting up " + game.name + Chr(8230), 0)
+    m.top.findNode("nativeTimer").control = "start"
     bridgeSend({ op: "host", game: game.id })
+end sub
+
+sub onNativeTimeout()
+    if m.mode <> "starting" then return
+    setMode("pick")
+    m.autoClose.control = "start"
+    showStatus("Couldn't reach the Dibs bridge on the home Mac", 6)
 end sub
 
 sub resumeNative()
@@ -268,6 +281,7 @@ sub onBridgeMessage()
     else if t = "error"
         text = "Dibs had a problem"
         if msg.text <> invalid then text = msg.text
+        m.top.findNode("nativeTimer").control = "stop"
         if m.mode = "starting"
             setMode("pick")
             m.autoClose.control = "start"
@@ -285,6 +299,7 @@ sub onBridgeMessage()
         if msg.text <> invalid then showStatus(msg.text, 6)
     else
         m.lastScreen = msg
+        m.top.findNode("nativeTimer").control = "stop"
         if m.mode = "starting"
             setMode("native")
             hideStatus()
@@ -347,7 +362,10 @@ sub onAutostart()
         startDemo()
         return
     end if
-    if m.top.streamer = "" then return
+    if m.top.streamer = ""
+        m.pendingStart = m.top.autostart
+        return
+    end if
     for i = 0 to m.GAMES.Count() - 1
         if m.GAMES[i].id = m.top.autostart then m.focus = i
     end for
