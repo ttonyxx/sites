@@ -278,6 +278,7 @@ sub onBridgeMessage()
     msg = m.bridge.message
     if msg = invalid or msg.t = invalid then return
     t = msg.t
+    if t = "status" or t = "error" or t = "room" or t = "stream" or t = "ended" then print "[window] bridge "; t; " (mode "; m.mode; ")"
     if t = "status"
         if msg.text <> invalid then showStatus(msg.text, 4)
     else if t = "error"
