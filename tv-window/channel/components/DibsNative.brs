@@ -10,6 +10,7 @@
 '           (spins through everyone's faces like a spotlight, once per key, then shows the rest)
 '   message { title, body }
 '   fight / champ / tees  (Tee Party; see the Tee Party section)
+'   fbready / fbturn / fbround / fbover  (Fishbowl; see the Fishbowl section)
 ' dark (bool): light text on a dark background (Imposter).
 
 sub init()
@@ -33,6 +34,10 @@ sub init()
     m.fightNote = invalid
     m.fightCallout = ""
     m.teeKey = ""
+    m.fbKey = ""
+    m.fbTurn = invalid
+    m.fbScores = []
+    m.urgent = invalid
     m.top.findNode("flashTimer").observeField("fire", "onFlashDone")
     m.sig = ""
     m.top.findNode("tick").observeField("fire", "onTick")
@@ -136,6 +141,16 @@ sub onScreen()
     end if
     m.fight = invalid
     m.fightNote = invalid
+    ' Fishbowl re-sends a turn on every card got: pop in the new cards, keep the clock running.
+    if t = "fbturn" and m.fbTurn <> invalid and s.key <> invalid and s.code <> invalid
+        if m.fbTurn.key = s.key and m.fbTurn.code = s.code
+            updateFbTurn(s)
+            if s.secs <> invalid and m.timerLabel <> invalid then setSecs(s.secs)
+            return
+        end if
+    end if
+    m.fbTurn = invalid
+    m.urgent = invalid
     setTheme(Truthy(s.dark))
     if s.color <> invalid then m.top.findNode("bg").color = s.color
     m.spin.control = "stop"
@@ -167,11 +182,19 @@ sub onScreen()
         drawChamp(s)
     else if t = "tees"
         drawTees(s)
+    else if t = "fbready"
+        drawFbReady(s)
+    else if t = "fbturn"
+        drawFbTurn(s)
+    else if t = "fbround"
+        drawFbRound(s)
+    else if t = "fbover"
+        drawFbOver(s)
     else
         drawMessage(s)
     end if
     drawChip(s, t <> "lobby" and s.code <> invalid)
-    if s.secs <> invalid and t <> "sea" then drawTimer(s.secs)
+    if s.secs <> invalid and t <> "sea" and t <> "fbturn" then drawTimer(s.secs) ' a turn draws its own big clock
 end sub
 
 sub drawTitle(s as Object)
@@ -249,20 +272,23 @@ sub drawStage(s as Object)
     if s.players <> invalid
         n = s.players.Count()
         if n > 0
+            ' Up to 12 faces at full size; bigger rooms (Punchline and Fishbowl take 16) squeeze in.
+            pitch = 138
+            if n * pitch > 1760 then pitch = 1760 / n
             size = 84
-            gap = 54
-            w = n * size + (n - 1) * gap
-            x0 = (1920 - w) / 2
+            if size > pitch - 26 then size = pitch - 26
+            x0 = (1920 - n * pitch) / 2
             for i = 0 to n - 1
                 p = s.players[i]
-                a = Avatar(v, p, x0 + i * (size + gap), 790, size)
+                ax = x0 + i * pitch + (pitch - size) / 2
+                a = Avatar(v, p, ax, 790, size)
                 if Truthy(p.done)
-                    tick = DCard(v, x0 + i * (size + gap) + size - 30, 778, 44, 44, "0x2DD4A0FF")
+                    tick = DCard(v, ax + size - 30, 778, 44, 44, "0x2DD4A0FF")
                     Txt(tick, "OK", DF("Display-Bold", 18), m.INK, 0, 11, 44, "center")
                 else
                     a.opacity = 0.55
                 end if
-                nm = Txt(v, p.name, DF("Text-Bold", 24), m.FG, x0 + i * (size + gap) - 30, 884, size + 60, "center")
+                nm = Txt(v, p.name, DF("Text-Bold", 24), m.FG, x0 + i * pitch, 884, pitch, "center")
                 nm.wrap = false
             end for
         end if
@@ -1487,6 +1513,510 @@ sub drawTees(s as Object)
     if s.note <> invalid then Txt(v, s.note, DF("Display-Bold", 32), m.FG, 80, 994, 1330, "left")
 end sub
 
+' ---- Fishbowl -----------------------------------------------------------------------------------
+'   fbready { key, round, rule, ruleText, giver: {name, color, away}, team, fill, ink, carry, hint,
+'             recap: {name, color, team, fill, ink, text, got: []}, left, total, board }
+'   fbturn  { key, round, giver: {name, color}, team, fill, ink, heading, rule, got: [], left, total, board, secs }
+'             (re-sent on every card got: only the new cards, the count and the scores change)
+'   fbround { key, kicker, title, table, recap, next: {round, title, text}, starter, note, secs }
+'   fbover  { key, title, fill, ink, faces: [{name, color}], table, givers: [{name, color, score, team, fill, ink}],
+'             bowl: [{text, author}], cards, note }
+'   board = [{team, fill, ink, score, up, faces: [{name, color, giver, away}]}]
+'   table = { rounds: [{label, title}], rows: [{team, fill, ink, scores: [], total, win}] }
+' team fill/ink are the web's team colors: Goldfish yellow with ink text, Jellyfish purple with white text.
+
+function FbText(v as Dynamic) as String
+    if v = invalid then return ""
+    return v
+end function
+
+function FbNum(v as Dynamic) as String
+    if v = invalid then return "0"
+    return v.ToStr()
+end function
+
+function FbWidth(parent as Object, text as String, font as Object) as Float
+    probe = Txt(parent, text, font, m.INK, 0, 0, 0, "left")
+    probe.wrap = false
+    w = TextWidth(probe)
+    parent.removeChild(probe)
+    return w
+end function
+
+' A team's name on its color, outlined like the web's team chips. Returns its width.
+function FbTag(parent as Object, text as String, x as Float, y as Float, fill as String, ink as String) as Float
+    font = DF("Display-ExtraBold", 30)
+    w = FbWidth(parent, text, font) + 44
+    chip = DCard(parent, x, y, w, 56, fill)
+    l = Txt(chip, text, font, ink, 0, 0, w, "center")
+    l.height = 56
+    l.vertAlign = "center"
+    l.wrap = false
+    return w
+end function
+
+' A small pill sized to its text (pill.9 is a perfect pill at 44 px tall). Returns its width.
+function FbPill(parent as Object, x as Float, y as Float, text as String, fill as String, ink as String) as Float
+    font = DF("Display-Bold", 22)
+    w = FbWidth(parent, text, font) + 36
+    p = AddPoster(parent, "pkg:/images/pill.9.png", x, y, w, 44)
+    p.blendColor = fill
+    Txt(parent, text, font, ink, x, y + 9, w, "center")
+    return w
+end function
+
+' Lays out slips of the given widths in rows, starting at x = lead. invalid when they don't fit.
+function FbFlow(widths as Object, first as Integer, lead as Float, w as Float, rows as Integer, gap as Float, rowH as Float) as Dynamic
+    out = []
+    x = lead
+    r = 0
+    for i = first to widths.Count() - 1
+        ww = widths[i]
+        if ww > w then ww = w
+        if x > 0 and x + ww > w
+            r = r + 1
+            x = 0
+        end if
+        if r >= rows then return invalid
+        out.Push([x, r * rowH, ww])
+        x = x + ww + gap
+    end for
+    return out
+end function
+
+' The cards a turn got, as paper slips in rows. When they don't all fit, the oldest give way to a "+N"
+' slip. Slips from index fresh on pop in (fresh < 0: none do).
+sub FbSlips(parent as Object, got as Object, x0 as Float, y0 as Float, w as Float, rows as Integer, small as Boolean, fresh as Integer)
+    size = 30
+    h = 62
+    if small
+        size = 24
+        h = 56
+    end if
+    font = DF("Display-Bold", size)
+    gap = 18
+    rowH = h + 16
+    widths = []
+    for each t in got
+        widths.Push(FbWidth(parent, t, font) + h + 30)
+    end for
+    first = 0
+    lead = 0
+    spots = FbFlow(widths, 0, 0, w, rows, gap, rowH)
+    while spots = invalid and first < got.Count() - 1
+        first = first + 1
+        lead = FbWidth(parent, "+" + first.ToStr(), font) + 40 + gap
+        spots = FbFlow(widths, first, lead, w, rows, gap, rowH)
+    end while
+    if spots = invalid then return
+    if first > 0
+        more = DCard(parent, x0, y0, lead - gap, h, "0xE8F6FFFF")
+        ml = Txt(more, "+" + first.ToStr(), font, m.INK, 0, 0, lead - gap, "center")
+        ml.height = h
+        ml.vertAlign = "center"
+    end if
+    anim = invalid
+    if fresh >= 0 and fresh < got.Count() then anim = NewAnim(parent, 0.45 + (got.Count() - 1 - fresh) * 0.08)
+    for k = 0 to spots.Count() - 1
+        i = first + k
+        sp = spots[k]
+        ww = sp[2]
+        slip = parent.CreateChild("Group")
+        slip.translation = [x0 + sp[0] + ww / 2, y0 + sp[1] + h / 2]
+        slip.rotation = ((i * 37) mod 9 - 4) * 0.0175
+        DCard(slip, -ww / 2, -h / 2, ww, h, "0xFFF6E8FF")
+        AddPoster(slip, "pkg:/images/fb_check.png", -ww / 2 + 12, -h / 2 + (h - 40) / 2, 40, 40)
+        l = Txt(slip, got[i], font, m.INK, -ww / 2 + 60, -h / 2, ww - 74, "left")
+        l.height = h
+        l.vertAlign = "center"
+        l.wrap = false
+        if anim <> invalid and i >= fresh
+            slip.id = "fbSlip" + i.ToStr()
+            slip.opacity = 0
+            slip.scale = [0.3, 0.3]
+            t0 = (i - fresh) * 0.08
+            Keyframes(anim, "FloatFieldInterpolator", slip.id + ".opacity", [0, t0, t0 + 0.12, anim.duration], [0.0, 0.0, 1.0, 1.0])
+            Keyframes(anim, "Vector2DFieldInterpolator", slip.id + ".scale", [0, t0, t0 + 0.22, t0 + 0.34, anim.duration], [[0.3, 0.3], [0.3, 0.3], [1.12, 1.12], [1.0, 1.0], [1.0, 1.0]])
+        end if
+    end for
+    if anim <> invalid then anim.control = "start"
+end sub
+
+' Both teams along the bottom: name, score and faces. The team giving clues sits higher, with a label;
+' the clue-giver has a white halo.
+sub FbBoard(parent as Object, board as Dynamic, upLabel as String)
+    m.fbScores = []
+    if board = invalid then return
+    n = board.Count()
+    if n = 0 then return
+    gap = 40
+    w = (1760 - (n - 1) * gap) / n
+    for i = 0 to n - 1
+        b = board[i]
+        up = Truthy(b.up)
+        y = 724
+        if up then y = 704
+        card = DCard(parent, 80 + i * (w + gap), y, w, 196, b.fill)
+        nm = Txt(card, FbText(b.team), DF("Display-ExtraBold", 46), b.ink, 32, 18, w - 280, "left")
+        nm.wrap = false
+        sc = Txt(card, FbNum(b.score), DF("Display-ExtraBold", 84), b.ink, w - 230, -4, 200, "right")
+        sc.id = "fbScore" + i.ToStr()
+        sc.scaleRotateCenter = [170, 56]
+        m.fbScores.Push(sc)
+        faces = []
+        if b.faces <> invalid then faces = b.faces
+        nf = faces.Count()
+        if nf > 0
+            pitch = (w - 48) / nf
+            if pitch > 110 then pitch = 110
+            size = 58
+            if size > pitch - 16 then size = pitch - 16
+            for j = 0 to nf - 1
+                f = faces[j]
+                fx = 24 + j * pitch
+                ax = fx + (pitch - size) / 2
+                if Truthy(f.giver)
+                    halo = AddPoster(card, "pkg:/images/dot.png", ax - 11, 91, size + 22, size + 22)
+                    halo.blendColor = m.WHITE
+                end if
+                a = Avatar(card, f, ax, 102, size)
+                if Truthy(f.away) then a.opacity = 0.45
+                fl = Txt(card, f.name, DF("Text-Bold", 20), b.ink, fx, 166, pitch, "center")
+                fl.wrap = false
+            end for
+        end if
+        if up and upLabel <> "" then FbPill(card, 32, -24, upLabel, m.WHITE, m.INK)
+    end for
+end sub
+
+' Each team's cards per round and the total; the winning team's row is gold. Returns the height.
+function FbTable(parent as Object, tbl as Dynamic, x as Float, y as Float, w as Float) as Float
+    if tbl = invalid then return 0
+    rounds = []
+    if tbl.rounds <> invalid then rounds = tbl.rounds
+    rows = []
+    if tbl.rows <> invalid then rows = tbl.rows
+    nR = rounds.Count()
+    h = 104 + rows.Count() * 86
+    card = DCard(parent, x, y, w, h, m.WHITE)
+    teamW = 330
+    totW = 190
+    colW = w - teamW - totW - 20
+    if nR > 0 then colW = colW / nR
+    for i = 0 to nR - 1
+        Txt(card, rounds[i].label, DF("Display-ExtraBold", 30), m.INK, teamW + i * colW, 20, colW, "center")
+        Txt(card, rounds[i].title, DF("Text-Regular", 22), "0x221836B3", teamW + i * colW, 58, colW, "center")
+    end for
+    Txt(card, "Total", DF("Display-ExtraBold", 30), m.INK, w - totW - 20, 20, totW, "center")
+    for j = 0 to rows.Count() - 1
+        r = rows[j]
+        ry = 104 + j * 86
+        if Truthy(r.win)
+            band = AddPoster(card, "pkg:/images/card.9.png", 14, ry - 8, w - 28, 72)
+            band.blendColor = "0xFFE38AFF"
+        end if
+        FbTag(card, FbText(r.team), 28, ry, r.fill, r.ink)
+        scores = []
+        if r.scores <> invalid then scores = r.scores
+        for i = 0 to nR - 1
+            if i < scores.Count() then Txt(card, FbNum(scores[i]), DF("Display-ExtraBold", 46), m.INK, teamW + i * colW, ry, colW, "center")
+        end for
+        Txt(card, FbNum(r.total), DF("Display-ExtraBold", 54), m.INK, w - totW - 20, ry - 4, totW, "center")
+    end for
+    return h
+end function
+
+' Between turns: the round's rule, who's up, what the last turn got, and the teams.
+sub drawFbReady(s as Object)
+    drawTitle(s)
+    v = m.view
+    key = FbText(s.key)
+    animate = key <> m.fbKey
+    m.fbKey = key
+    fill = "0xFFC93CFF"
+    ink = m.INK
+    if s.fill <> invalid then fill = s.fill
+    if s.ink <> invalid then ink = s.ink
+    round = FbNum(s.round)
+    rule = v.CreateChild("Group")
+    rule.id = "fbRule"
+    rule.translation = [80, 166]
+    DCard(rule, 0, 0, 860, 300, m.WHITE)
+    ring = AddPoster(rule, "pkg:/images/dot.png", 32, 34, 100, 100)
+    ring.blendColor = m.INK
+    badge = AddPoster(rule, "pkg:/images/dot.png", 36, 38, 92, 92)
+    badge.blendColor = "0xFFC93CFF"
+    Txt(rule, round, DF("Display-ExtraBold", 54), m.INK, 36, 50, 92, "center")
+    Txt(rule, "ROUND " + round + " OF 3", DF("Display-Bold", 28), "0x221836B3", 160, 40, 670, "left")
+    Txt(rule, FbText(s.rule), DF("Display-ExtraBold", 64), m.INK, 160, 70, 670, "left")
+    rt = Txt(rule, FbText(s.ruleText), DF("Text-Regular", 28), m.INK, 36, 158, 790, "left")
+    rt.maxLines = 3
+    up = v.CreateChild("Group")
+    up.id = "fbUp"
+    up.translation = [980, 166]
+    DCard(up, 0, 0, 860, 300, fill)
+    if s.giver <> invalid
+        a = Avatar(up, s.giver, 40, 44, 150)
+        if Truthy(s.giver.away) then a.opacity = 0.45
+        nl = Txt(up, FbText(s.giver.name) + " is up", DF("Display-ExtraBold", 66), ink, 228, 38, 600, "left")
+        nl.wrap = false
+        Txt(up, "Giving clues for " + FbText(s.team), DF("Display-Bold", 34), ink, 228, 126, 600, "left")
+        if s.carry <> invalid then FbPill(up, 228, 184, s.carry, m.WHITE, m.INK)
+        hl = Txt(up, FbText(s.hint), DF("Text-Bold", 28), ink, 40, 238, 780, "left")
+        hl.wrap = false
+    else
+        hl = Txt(up, FbText(s.hint), DF("Display-ExtraBold", 48), ink, 40, 0, 780, "center")
+        hl.height = 300
+        hl.vertAlign = "center"
+    end if
+    strip = DCard(v, 80, 498, 1760, 180, m.WHITE)
+    AddPoster(strip, "pkg:/images/fb_bowl.png", 1760 - 270, 26, 132, 120)
+    bl = Txt(strip, FbNum(s.left), DF("Display-ExtraBold", 60), m.INK, 1760 - 130, 30, 110, "left")
+    Txt(strip, "left", DF("Text-Bold", 26), "0x221836B3", 1760 - 128, 104, 110, "left")
+    if s.recap <> invalid
+        r = s.recap
+        tw = FbTag(strip, FbText(r.team), 28, 22, r.fill, r.ink)
+        Avatar(strip, r, 28 + tw + 20, 24, 50)
+        rl = Txt(strip, FbText(r.text), DF("Display-Bold", 36), m.INK, 28 + tw + 88, 28, 1300 - tw, "left")
+        rl.wrap = false
+        got = []
+        if r.got <> invalid then got = r.got
+        if got.Count() > 0
+            FbSlips(strip, got, 28, 100, 1440, 1, true, -1)
+        else
+            Txt(strip, "No cards that time.", DF("Text-Regular", 30), "0x22183699", 28, 110, 1200, "left")
+        end if
+    else
+        where = "in the bowl"
+        if s.round <> invalid and s.round > 1 then where = "back in the bowl"
+        bt = Txt(strip, "All " + FbNum(s.total) + " cards are " + where, DF("Display-ExtraBold", 54), m.INK, 40, 0, 1400, "left")
+        bt.height = 180
+        bt.vertAlign = "center"
+    end if
+    FbBoard(v, s.board, "UP NEXT")
+    if animate
+        anim = NewAnim(v, 0.6)
+        rule.scaleRotateCenter = [430, 150]
+        up.scaleRotateCenter = [430, 150]
+        rule.opacity = 0
+        up.opacity = 0
+        Keyframes(anim, "FloatFieldInterpolator", "fbRule.opacity", [0, 0.15, 0.6], [0.0, 1.0, 1.0])
+        Keyframes(anim, "Vector2DFieldInterpolator", "fbRule.scale", [0, 0.3, 0.45, 0.6], [[0.9, 0.9], [1.03, 1.03], [1.0, 1.0], [1.0, 1.0]])
+        Keyframes(anim, "FloatFieldInterpolator", "fbUp.opacity", [0, 0.15, 0.3, 0.6], [0.0, 0.0, 1.0, 1.0])
+        Keyframes(anim, "Vector2DFieldInterpolator", "fbUp.translation", [0, 0.15, 0.45, 0.6], [[1100, 166], [1100, 166], [970, 166], [980, 166]])
+        anim.control = "start"
+    end if
+end sub
+
+' A turn: the clock, who's describing for which team, the cards got so far, and the teams.
+sub drawFbTurn(s as Object)
+    drawTitle(s)
+    v = m.view
+    key = FbText(s.key)
+    animate = key <> m.fbKey
+    m.fbKey = key
+    fill = "0xFFC93CFF"
+    ink = m.INK
+    if s.fill <> invalid then fill = s.fill
+    if s.ink <> invalid then ink = s.ink
+    ' The clock, in the team's color (red for the last five seconds).
+    clock = v.CreateChild("Group")
+    clock.id = "fbClock"
+    clock.translation = [80, 166]
+    clock.scaleRotateCenter = [115, 115]
+    ring = AddPoster(clock, "pkg:/images/dot.png", -7, -7, 244, 244)
+    ring.blendColor = m.INK
+    face = AddPoster(clock, "pkg:/images/dot.png", 0, 0, 230, 230)
+    face.blendColor = fill
+    m.timerLabel = Txt(clock, "", DF("Display-ExtraBold", 112), ink, 0, 42, 230, "center")
+    m.timerGroup = clock
+    pulse = NewAnim(v, 0.35)
+    Keyframes(pulse, "Vector2DFieldInterpolator", "fbClock.scale", [0, 0.12, 0.35], [[1.0, 1.0], [1.14, 1.14], [1.0, 1.0]])
+    m.urgent = { face: face, fill: fill, ink: ink, hot: false, last: -1, pulse: pulse }
+    who = { name: "Someone" }
+    if s.giver <> invalid then who = s.giver
+    Avatar(v, who, 372, 180, 54)
+    gl = Txt(v, FbText(who.name) + " is giving clues for " + FbText(s.team), DF("Display-Bold", 40), m.FG, 446, 184, 1400, "left")
+    gl.wrap = false
+    Txt(v, FbText(s.heading), DF("Display-ExtraBold", 84), m.FG, 372, 246, 1480, "left")
+    Txt(v, FbText(s.rule), DF("Display-Bold", 32), m.FG2, 372, 360, 1480, "left")
+    panel = DCard(v, 80, 434, 1760, 246, m.WHITE)
+    Txt(panel, "Got so far", DF("Display-Bold", 36), m.INK, 36, 22, 600, "left")
+    AddPoster(panel, "pkg:/images/fb_bowl.png", 1760 - 236, 10, 66, 60)
+    m.fbLeft = Txt(panel, "", DF("Display-ExtraBold", 36), m.INK, 1760 - 162, 22, 140, "left")
+    m.fbSlips = panel.CreateChild("Group")
+    m.fbTurn = { key: key, code: s.code, got: -1, board: [] }
+    FbBoard(v, s.board, "GIVING CLUES")
+    updateFbTurn(s)
+    if s.secs <> invalid then setSecs(s.secs)
+    if animate
+        anim = NewAnim(v, 0.5)
+        clock.scale = [0.4, 0.4]
+        Keyframes(anim, "Vector2DFieldInterpolator", "fbClock.scale", [0, 0.3, 0.42, 0.5], [[0.4, 0.4], [1.1, 1.1], [0.97, 0.97], [1.0, 1.0]])
+        anim.control = "start"
+    end if
+end sub
+
+' A turn moved on: pop in the new cards, update what's left and the scores.
+sub updateFbTurn(s as Object)
+    t = m.fbTurn
+    if t = invalid then return
+    got = []
+    if s.got <> invalid then got = s.got
+    if got.Count() <> t.got
+        fresh = t.got
+        if fresh < 0 or fresh > got.Count() then fresh = 0
+        m.fbSlips.removeChildrenIndex(m.fbSlips.getChildCount(), 0)
+        if got.Count() = 0
+            Txt(m.fbSlips, "Nothing yet. Come on!", DF("Text-Regular", 36), "0x22183699", 36, 116, 1200, "left")
+        else
+            FbSlips(m.fbSlips, got, 36, 86, 1688, 2, false, fresh)
+        end if
+        t.got = got.Count()
+    end if
+    m.fbLeft.text = FbNum(s.left) + " left"
+    if s.board <> invalid
+        for i = 0 to s.board.Count() - 1
+            if i < m.fbScores.Count()
+                sc = m.fbScores[i]
+                now = FbNum(s.board[i].score)
+                if sc.text <> now
+                    sc.text = now
+                    pop = NewAnim(m.view, 0.4)
+                    Keyframes(pop, "Vector2DFieldInterpolator", sc.id + ".scale", [0, 0.12, 0.4], [[1.0, 1.0], [1.4, 1.4], [1.0, 1.0]])
+                    pop.control = "start"
+                end if
+            end if
+        end for
+    end if
+end sub
+
+' The bowl is empty: scores by round, who emptied it, and the next round's rule.
+sub drawFbRound(s as Object)
+    drawTitle(s)
+    v = m.view
+    m.fbKey = FbText(s.key)
+    if s.kicker <> invalid then Txt(v, UCase(s.kicker), DF("Display-Bold", 34), m.FG2, 160, 150, 1600, "center")
+    Txt(v, FbText(s.title), DF("Display-ExtraBold", 96), m.FG, 160, 192, 1600, "center")
+    FbTable(v, s.table, 80, 340, 1000)
+    if s.recap <> invalid
+        r = s.recap
+        card = DCard(v, 1120, 340, 720, 300, m.WHITE)
+        FbTag(card, FbText(r.team), 28, 24, r.fill, r.ink)
+        Avatar(card, r, 640, 26, 50)
+        rl = Txt(card, FbText(r.text), DF("Display-Bold", 32), m.INK, 28, 98, 664, "left")
+        rl.maxLines = 2
+        got = []
+        if r.got <> invalid then got = r.got
+        ' Two rows of cards when the line above fits on one line.
+        if FbWidth(card, FbText(r.text), DF("Display-Bold", 32)) <= 664
+            if got.Count() > 0 then FbSlips(card, got, 28, 150, 664, 2, true, -1)
+        else
+            if got.Count() > 0 then FbSlips(card, got, 28, 210, 664, 1, true, -1)
+        end if
+    end if
+    if s["next"] <> invalid
+        nx = s["next"]
+        card = DCard(v, 80, 690, 1340, 196, m.WHITE)
+        FbPill(card, 28, -22, "UP NEXT", "0xFFC93CFF", m.INK)
+        Txt(card, "Round " + FbNum(nx.round) + " of 3: " + FbText(nx.title), DF("Display-ExtraBold", 54), m.INK, 36, 34, 1270, "left")
+        nt = Txt(card, FbText(nx.text), DF("Text-Regular", 30), m.INK, 36, 108, 1270, "left")
+        nt.maxLines = 2
+    end if
+    y = 914
+    if s.starter <> invalid
+        Txt(v, s.starter, DF("Display-Bold", 32), m.FG, 80, y, 1320, "left")
+        y = y + 52
+    end if
+    if s.note <> invalid then Txt(v, s.note, DF("Text-Bold", 28), m.FG, 80, y, 1320, "left")
+end sub
+
+' Game over: the winning team, the scores, the best clue-givers, and every card that was in the bowl.
+sub drawFbOver(s as Object)
+    drawTitle(s)
+    v = m.view
+    key = FbText(s.key)
+    animate = key <> m.fbKey
+    m.fbKey = key
+    fill = m.WHITE
+    ink = m.INK
+    if s.fill <> invalid then fill = s.fill
+    if s.ink <> invalid then ink = s.ink
+    win = v.CreateChild("Group")
+    win.id = "fbWin"
+    win.translation = [580, 316]
+    win.rotation = -0.017
+    DCard(win, -500, -150, 1000, 300, fill)
+    AddPoster(win, "pkg:/images/fb_crown.png", -60, -136, 120, 91)
+    wl = Txt(win, FbText(s.title), DF("Display-ExtraBold", 80), ink, -480, -44, 960, "center")
+    wl.wrap = false
+    faces = []
+    if s.faces <> invalid then faces = s.faces
+    nf = faces.Count()
+    if nf > 0
+        pitch = 900 / nf
+        if pitch > 76 then pitch = 76
+        size = 52
+        if size > pitch - 12 then size = pitch - 12
+        x0 = -(nf * pitch) / 2
+        for i = 0 to nf - 1
+            Avatar(win, faces[i], x0 + i * pitch + (pitch - size) / 2, 74, size)
+        end for
+    end if
+    th = FbTable(v, s.table, 80, 494, 1000)
+    givers = []
+    if s.givers <> invalid then givers = s.givers
+    n = givers.Count()
+    if n > 3 then n = 3
+    if n > 0
+        gy = 494 + th + 30
+        card = DCard(v, 80, gy, 1000, 70 + n * 52, m.WHITE)
+        Txt(card, "Best clue-givers", DF("Display-Bold", 32), m.INK, 28, 16, 600, "left")
+        for i = 0 to n - 1
+            g = givers[i]
+            ry = 66 + i * 52
+            Txt(card, (i + 1).ToStr(), DF("Display-ExtraBold", 30), m.INK, 20, ry + 4, 40, "center")
+            Avatar(card, g, 76, ry, 40)
+            nm = Txt(card, FbText(g.name), DF("Text-Bold", 28), m.INK, 134, ry + 4, 420, "left")
+            nm.wrap = false
+            FbPill(card, 580, ry - 2, FbText(g.team), g.fill, g.ink)
+            Txt(card, FbNum(g.score), DF("Display-ExtraBold", 34), m.INK, 840, ry, 130, "right")
+        end for
+    end if
+    ' The bowl: every card and who wrote it.
+    bowl = []
+    if s.bowl <> invalid then bowl = s.bowl
+    card = DCard(v, 1120, 160, 760, 714, m.WHITE)
+    Txt(card, "What was in the bowl", DF("Display-Bold", 34), m.INK, 28, 22, 520, "left")
+    count = FbNum(s.cards) + " cards"
+    cw = FbWidth(card, count, DF("Display-Bold", 22)) + 36
+    FbPill(card, 760 - 28 - cw, 20, count, "0xFFC93CFF", m.INK)
+    tints = ["0xFFE9A8FF", "0xFFD3E8FF", "0xD9F2FFFF", "0xDDF7ECFF"]
+    colW = 344
+    for i = 0 to bowl.Count() - 1
+        if i >= 22 then exit for
+        c = bowl[i]
+        cx = 28 + (i mod 2) * (colW + 16)
+        cy = 86 + (i \ 2) * 56
+        p = AddPoster(card, "pkg:/images/pill.9.png", cx, cy, colW, 44)
+        p.blendColor = tints[i mod 4]
+        ct = Txt(card, FbText(c.text), DF("Display-Bold", 22), m.INK, cx + 18, cy + 9, colW - 140, "left")
+        ct.wrap = false
+        ca = Txt(card, FbText(c.author), DF("Text-Regular", 18), "0x221836A6", cx + colW - 126, cy + 12, 110, "right")
+        ca.wrap = false
+    end for
+    if s.note <> invalid then Txt(v, s.note, DF("Display-Bold", 30), m.FG, 1120, 896, 760, "left")
+    if animate
+        anim = NewAnim(v, 1.0)
+        win.opacity = 0
+        win.scale = [0.6, 0.6]
+        Keyframes(anim, "FloatFieldInterpolator", "fbWin.opacity", [0, 0.25, 0.4, 1.0], [0.0, 0.0, 1.0, 1.0])
+        Keyframes(anim, "Vector2DFieldInterpolator", "fbWin.scale", [0, 0.25, 0.65, 0.82, 1.0], [[0.6, 0.6], [0.6, 0.6], [1.05, 1.05], [0.98, 0.98], [1.0, 1.0]])
+        Keyframes(anim, "FloatFieldInterpolator", "fbWin.rotation", [0, 0.25, 0.75, 1.0], [-0.1, -0.1, -0.017, -0.017])
+        anim.control = "start"
+    end if
+end sub
+
 ' Corner join chip (code + small QR), like the web TV keeps on screen during games.
 sub drawChip(s as Object, show as Boolean)
     m.chip.removeChildrenIndex(m.chip.getChildCount(), 0)
@@ -1523,4 +2053,20 @@ sub onTick()
     remain = m.secs - Int(m.since.TotalMilliseconds() / 1000)
     if remain < 0 then remain = 0
     m.timerLabel.text = remain.ToStr()
+    ' A Fishbowl turn's clock goes red for the last five seconds and thumps once a second.
+    u = m.urgent
+    if u = invalid then return
+    hot = remain <= 5
+    if hot <> u.hot
+        u.hot = hot
+        if hot
+            u.face.blendColor = m.RED
+            m.timerLabel.color = m.WHITE
+        else
+            u.face.blendColor = u.fill
+            m.timerLabel.color = u.ink
+        end if
+    end if
+    if hot and remain > 0 and remain <> u.last then u.pulse.control = "start"
+    u.last = remain
 end sub

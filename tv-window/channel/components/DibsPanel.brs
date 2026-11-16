@@ -6,6 +6,7 @@ sub init()
         { id: "brawl", name: "Blob Brawl" }
         { id: "piggyback", name: "Piggyback" }
         { id: "pirates", name: "Pirates" }
+        { id: "fishbowl", name: "Fishbowl" }
     ]
     m.mode = "card"
     m.focus = 0 ' -1 = the "Back to <game>" button
@@ -26,13 +27,14 @@ sub init()
     hint.color = White(0.55)
     hint.text = "Press OK to close"
 
-    ' Game picker: 3 x 2 tiles under an optional "Back to <game>" button.
+    ' Game picker: rows of four tiles under an optional "Back to <game>" button.
+    m.COLS = 4
     tiles = m.top.findNode("tiles")
     m.tilePos = []
     for i = 0 to m.GAMES.Count() - 1
-        x = 260 + (i mod 3) * 480
-        y = 330 + (i \ 3) * 284
-        AddPoster(tiles, "pkg:/images/dibs_g_" + m.GAMES[i].id + ".png", x, y, 440, 250)
+        x = 140 + (i mod m.COLS) * 420
+        y = 330 + (i \ m.COLS) * 262
+        AddPoster(tiles, "pkg:/images/dibs_g_" + m.GAMES[i].id + ".png", x, y, 380, 216)
         m.tilePos.Push([x - 16, y - 16])
     end for
     m.top.findNode("resumeText").font = MakeFont("SemiBold", 30)
@@ -198,8 +200,8 @@ sub moveRing(animate as Boolean)
         ring.height = 92
     else
         target = m.tilePos[m.focus]
-        ring.width = 472
-        ring.height = 282
+        ring.width = 412
+        ring.height = 248
     end if
     if not animate
         ring.translation = target
@@ -226,7 +228,7 @@ end sub
 ' The oldest home streamer that can draw everything in NativeGames(). An older one is asked to update itself
 ' from GitHub (it refuses while a room is running).
 function MinStreamer() as String
-    return "2026-11-15.3"
+    return "2026-11-15.4"
 end function
 
 ' "2026-11-15.2" style versions: the date, then the build number.
@@ -265,7 +267,7 @@ sub onStreamerVersion()
 end sub
 
 function NativeGames() as Object
-    return { punchline: true, imposter: true, "tee-party": true, pirates: true }
+    return { punchline: true, imposter: true, "tee-party": true, pirates: true, fishbowl: true }
 end function
 
 function BridgeHost() as String
@@ -412,6 +414,7 @@ function DemoScreens(which as String) as Object
     if which = "demo-imposter" then return ImposterDemo(now)
     if which = "demo-pirates" then return PiratesDemo(now)
     if which = "demo-tee" then return TeeDemo(now)
+    if which = "demo-fishbowl" then return FishbowlDemo(now)
     b = { game: "Punchline", color: "0xFFC93CFF", code: "DEMOAB", join: "https://dibsgames.com/punchline/game/DEMOAB", now: now }
     tony = { name: "Tony", color: "0x2DD4A0FF", host: true }
     maya = { name: "Maya", color: "0xFF7AC6FF" }
@@ -443,6 +446,46 @@ function TeeDemo(now as Double) as Object
         With(b, { t: "champ", key: "demo-c1", kicker: "Round 1", title: "Round 1 champ!", img: "/tee.png?k=demo4", wins: "2 knockouts in a row", credits: ["Shirt by Maya", "Art by Tony", "Words by Sam"], note: "Round 2 is next: more drawings, more slogans.", secs: 8 })
         With(b, { t: "tees", key: "demo-o1", kicker: "The tee of the night", img: "/tee.png?k=demo3", credits: ["Shirt by Lee", "Words by Maya"], rows: [With(lee, { score: 1650 }), With(maya, { score: 1400 }), With(tony, { score: 1100 }), With(sam, { score: 900 })], awards: [With(tony, { title: "Best artist", name: "Tony", detail: "7 votes for their drawings" }), With(maya, { title: "Best writer", name: "Maya", detail: "9 votes for their slogans" }), With(lee, { title: "Knockout king", name: "Lee", detail: "4 knockouts" })], note: "Waiting for Tony to start a new game" })
     ]
+end function
+
+' Fishbowl samples: six players in two teams, one screen per step of a game.
+function FishbowlDemo(now as Double) as Object
+    b = { game: "Fishbowl", color: "0xFF9A52FF", code: "DEMOFB", join: "https://dibsgames.com/fishbowl/game/DEMOFB", now: now }
+    dot = "   " + Chr(183) + "   "
+    tony = { name: "Tony", color: "0x2DD4A0FF" }
+    maya = { name: "Maya", color: "0xFF7AC6FF" }
+    sam = { name: "Sam", color: "0x47B5FFFF" }
+    lee = { name: "Lee", color: "0xFF6B57FF" }
+    ana = { name: "Ana", color: "0xFFC93CFF" }
+    ben = { name: "Ben", color: "0x9B6CFFFF" }
+    gold = { team: "Goldfish", fill: "0xFFC93CFF", ink: "0x221836FF" }
+    jelly = { team: "Jellyfish", fill: "0x9B6CFFFF", ink: "0xFFFFFFFF" }
+    describe = "Use any words except the ones on the card. No spelling, no rhymes, no " + Chr(34) + "sounds like" + Chr(34) + ". Skipping is allowed this round."
+    act = "No words and no sounds: mime it. No skipping this round, so stick with every card."
+    rounds3 = [{ label: "R1", title: "Describe it" }, { label: "R2", title: "Act it out" }, { label: "R3", title: "One word" }]
+    return [
+        With(b, { t: "lobby", players: [With(tony, { host: true }), maya, sam, lee, ana, ben], max: 16, hint: "Tony starts the game from their phone", settings: "Everyone writes names and things into the bowl, then two teams guess them three times: describe it, act it out, one word" })
+        With(b, { t: "stage", kicker: "Everyone writes 4 names, places or things", heading: "Fill the bowl!", body: "17 cards in the bowl" + dot + "Still writing: Maya and Ben", phones: true, secs: 84, players: [With(tony, { done: true }), maya, With(sam, { done: true }), With(lee, { done: true }), With(ana, { done: true }), ben] })
+        With(b, With(jelly, { t: "fbready", key: "demo-r1", round: 1, rule: "Describe it", ruleText: describe, giver: maya, hint: "Maya starts the clock from their phone", recap: With(gold, With(tony, { text: "Tony got 5 cards", got: ["Taylor Swift", "The Eiffel Tower", "A rubber duck", "Spaghetti", "Abraham Lincoln"] })), left: 19, total: 24, board: FbDemoBoard(gold, jelly, 5, 0, "Maya") }))
+        With(b, With(jelly, { t: "fbturn", key: "demo-t2", round: 1, giver: maya, heading: "Jellyfish, guess out loud!", rule: "Round 1: Describe it" + dot + "Don't say the word", got: ["Harry Potter", "The Moon", "Grandma's cookies", "Mount Everest"], left: 15, total: 24, board: FbDemoBoard(gold, jelly, 5, 4, "Maya"), secs: 14 }))
+        With(b, With(jelly, { t: "fbturn", key: "demo-t2", round: 1, giver: maya, heading: "Jellyfish, guess out loud!", rule: "Round 1: Describe it" + dot + "Don't say the word", got: ["Harry Potter", "The Moon", "Grandma's cookies", "Mount Everest", "Michael Jordan"], left: 14, total: 24, board: FbDemoBoard(gold, jelly, 5, 5, "Maya"), secs: 7 }))
+        With(b, { t: "fbround", key: "demo-o1", kicker: "Round 1 of 3 done", title: "Bowl empty!", table: { rounds: [rounds3[0]], rows: [With(gold, { scores: [13], total: 13 }), With(jelly, { scores: [11], total: 11 })] }, recap: With(jelly, With(maya, { text: "Maya got 6 cards and emptied the bowl!", got: ["Batman", "Beyonce", "A volcano", "The Titanic", "Shakespeare", "A penguin"] })), next: { round: 2, title: "Act it out", text: act }, starter: "Maya starts round 2 with the time left on the clock", note: "Round 2 starts on its own, or when Tony taps Start", secs: 12 })
+        With(b, With(jelly, { t: "fbover", key: "demo-x1", title: "Jellyfish win!", faces: [maya, lee, ben], table: { rounds: rounds3, rows: [With(gold, { scores: [13, 9, 8], total: 30 }), With(jelly, { scores: [11, 12, 10], total: 33, win: true })] }, givers: [With(maya, With(jelly, { score: 14 })), With(tony, With(gold, { score: 11 })), With(lee, With(jelly, { score: 9 }))], cards: 24, note: "Waiting for Tony to start a new game", bowl: [{ text: "Taylor Swift", author: "Maya" }, { text: "The Eiffel Tower", author: "Tony" }, { text: "A rubber duck", author: "Sam" }, { text: "Spaghetti", author: "Lee" }, { text: "Abraham Lincoln", author: "Ana" }, { text: "Harry Potter", author: "Ben" }, { text: "The Moon", author: "Maya" }, { text: "Grandma's cookies", author: "Tony" }, { text: "Mount Everest", author: "Sam" }, { text: "Batman", author: "Lee" }, { text: "Beyonce", author: "Ana" }, { text: "A volcano", author: "Ben" }, { text: "The Titanic", author: "Maya" }, { text: "Shakespeare", author: "Tony" }, { text: "A penguin", author: "Sam" }, { text: "The Golden Gate Bridge", author: "Lee" }, { text: "Pizza", author: "the bowl" }, { text: "A haunted house", author: "Ana" }, { text: "Michael Jordan", author: "Ben" }, { text: "Fireworks", author: "the bowl" }, { text: "The Mona Lisa", author: "Maya" }, { text: "A traffic jam", author: "Tony" }] }))
+    ]
+end function
+
+' Both demo teams (Jellyfish up), with the clue-giver marked.
+function FbDemoBoard(g as Object, j as Object, gs as Integer, js as Integer, giver as String) as Object
+    teams = [[g, gs, false, [{ name: "Tony", color: "0x2DD4A0FF" }, { name: "Sam", color: "0x47B5FFFF" }, { name: "Ana", color: "0xFFC93CFF" }]], [j, js, true, [{ name: "Maya", color: "0xFF7AC6FF" }, { name: "Lee", color: "0xFF6B57FF" }, { name: "Ben", color: "0x9B6CFFFF" }]]]
+    out = []
+    for each t in teams
+        faces = []
+        for each p in t[3]
+            faces.Push({ name: p.name, color: p.color, giver: p.name = giver })
+        end for
+        out.Push(With(t[0], { score: t[1], up: t[2], faces: faces }))
+    end for
+    return out
 end function
 
 function ImposterDemo(now as Double) as Object
@@ -688,14 +731,17 @@ function onKeyEvent(key as String, press as Boolean) as Boolean
                 showStatus("Room ended", 3)
             end if
         else
-            if key = "right" and m.focus mod 3 < 2
+            cols = m.COLS
+            if key = "right" and m.focus mod cols < cols - 1 and m.focus + 1 < n
                 m.focus = m.focus + 1 : moved = true
-            else if key = "left" and m.focus mod 3 > 0
+            else if key = "left" and m.focus mod cols > 0
                 m.focus = m.focus - 1 : moved = true
-            else if key = "down" and m.focus + 3 < n
-                m.focus = m.focus + 3 : moved = true
-            else if key = "up" and m.focus >= 3
-                m.focus = m.focus - 3 : moved = true
+            else if key = "down" and m.focus + cols < n
+                m.focus = m.focus + cols : moved = true
+            else if key = "down" and m.focus \ cols < (n - 1) \ cols
+                m.focus = n - 1 : moved = true ' nothing right below: the last tile
+            else if key = "up" and m.focus >= cols
+                m.focus = m.focus - cols : moved = true
             else if key = "up" and m.liveInfo <> invalid
                 m.focus = -1 : moved = true
             else if key = "OK"

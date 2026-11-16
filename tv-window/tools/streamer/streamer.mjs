@@ -74,7 +74,7 @@ try {
   if (orphans.length) console.log(`stopped ${orphans.length} leftover encoder(s)`);
 } catch {}
 const LIVE = fs.mkdtempSync(path.join(os.tmpdir(), "dibs-live-"));
-const VERSION = "2026-11-15.3";
+const VERSION = "2026-11-15.4";
 // Stream size. The page still renders at 1920x1080 (the TV layout Dibs expects); the capture is scaled down.
 // 720p is plenty for Dibs's big type and halves the work per frame on a busy Mac. OUT=1080 for full HD.
 const OUT_H = Number(process.env.OUT || 720);
@@ -89,6 +89,7 @@ const GAMES = {
   brawl: "Blob Brawl",
   piggyback: "Piggyback",
   pirates: "Pirates",
+  fishbowl: "Fishbowl",
 };
 
 let browser = null;
@@ -623,7 +624,7 @@ function joinOrder(s, room) {
   const seen = (room.seen ??= new Map());
   for (const p of s.players || []) if (!seen.has(p.id)) seen.set(p.id, seen.size);
   return [...(s.players || [])].sort((a, b) => seen.get(a.id) - seen.get(b.id))
-    .map((p) => ({ id: p.id, name: p.name, color: avatarColor(p.name), host: p.id === s.hostId, online: p.online !== false, spectator: !!p.spectator, score: p.score || 0, ready: !!p.ready, voted: !!p.hasVoted }));
+    .map((p) => ({ id: p.id, name: p.name, color: avatarColor(p.name), host: p.id === s.hostId, online: p.online !== false, spectator: !!p.spectator, score: p.score || 0, ready: !!p.ready, voted: !!p.hasVoted, team: typeof p.team === "number" ? p.team : -1 }));
 }
 
 function lobbyHint(players, min) {
@@ -865,14 +866,105 @@ function teePartyScreen(s, room) {
   return null;
 }
 
+// Fishbowl (backend/internal/fishbowl PlayerView, as a screen sees it: the card being described never reaches a
+// screen). Everyone writes cards, then two teams take turns against the clock, three rounds with the same cards.
+const FB_RULES = {
+  describe: { title: "Describe it", short: "Don't say the word", text: "Use any words except the ones on the card. No spelling, no rhymes, no \"sounds like\". Skipping is allowed this round." },
+  act: { title: "Act it out", short: "No talking, no skipping", text: "No words and no sounds: mime it. No skipping this round, so stick with every card." },
+  one_word: { title: "One word", short: "One word, no skipping", text: "Say a single word for each card. You can repeat it, but not add to it. No skipping this round." },
+};
+const FB_ORDER = ["describe", "act", "one_word"];
+const FB_TEAMS = [["0xFFC93CFF", "0x221836FF"], ["0x9B6CFFFF", "0xFFFFFFFF"]]; // [fill, text] per team, like the web
+function fishbowlScreen(s, room) {
+  const base = { game: "Fishbowl", color: "0xFF9A52FF", code: room.code, join: `https://dibsgames.com/fishbowl/game/${room.code}`, now: Date.now() };
+  const players = joinOrder(s, room);
+  const host = players.find((p) => p.host);
+  const ph = s.phase;
+  // Keys change once per game, turn and round, so the TV animates each one once (and only adds the newest card mid-turn).
+  if (ph === "write" && room.phase !== "write") room.games = (room.games || 0) + 1;
+  if (ph === "turn" && room.phase !== "turn") room.turns = (room.turns || 0) + 1;
+  room.phase = ph;
+  const key = (what) => `${room.code}-${room.games || 0}-${what}`;
+  const secs = s.timeLeftMs > 0 && s.phaseMs > 0 ? Math.ceil(s.timeLeftMs / 1000) : undefined;
+  const teams = s.teams || [];
+  const team = (t) => ({ team: teams[t]?.name ?? "A team", fill: FB_TEAMS[t % 2][0], ink: FB_TEAMS[t % 2][1] });
+  const rule = FB_RULES[s.rule] || FB_RULES.describe;
+  const giving = ph === "ready" || ph === "turn";
+  // Both teams: score, who's on it, who's giving clues.
+  const board = teams.map((tm, t) => ({ ...team(t), score: tm.score || 0, up: giving && s.teamUp === t,
+    faces: players.filter((p) => p.team === t).map((p) => ({ name: p.name, color: p.color, giver: giving && p.id === s.giverId, away: !p.online })) }))
+    .filter((b) => b.faces.length || b.score);
+  const recapOf = (lt) => {
+    if (!lt) return undefined;
+    const n = (lt.got || []).length;
+    return { name: lt.giverName, color: avatarColor(lt.giverName), ...team(lt.team), got: (lt.got || []).slice(0, 14),
+      text: `${lt.giverName} got ${n === 1 ? "1 card" : `${n} cards`}${lt.emptiedBowl ? " and emptied the bowl!" : ""}` };
+  };
+  const table = (played) => ({ rounds: FB_ORDER.slice(0, played).map((r, i) => ({ label: `R${i + 1}`, title: FB_RULES[r].title })),
+    rows: teams.map((tm, t) => ({ ...team(t), scores: (tm.rounds || []).slice(0, played), total: tm.score || 0, win: ph === "game_over" && (s.winners || []).includes(t) })) });
+  if (ph === "lobby") {
+    return { ...base, t: "lobby", players: lobbyPlayers(players), max: 16, hint: lobbyHint(players, 4),
+      settings: "Everyone writes names and things into the bowl, then two teams guess them three times: describe it, act it out, one word" };
+  }
+  if (ph === "write") {
+    const done = new Set(s.done || []);
+    const active = players.filter((p) => !p.spectator && p.online);
+    const pending = active.filter((p) => !done.has(p.id));
+    const per = s.settings?.cardsPerPlayer || 4;
+    const inBowl = `${s.inBowl || 0} ${s.inBowl === 1 ? "card" : "cards"} in the bowl`;
+    return { ...base, t: "stage", kicker: `Everyone writes ${per} names, places or things`, heading: "Fill the bowl!",
+      body: pending.length ? `${inBowl}   ·   Still writing: ${names(pending)}` : `${inBowl}. Here we go!`, phones: true, secs,
+      players: active.map((p) => ({ name: p.name, color: p.color, done: done.has(p.id) })) };
+  }
+  if (ph === "ready") {
+    const giver = players.find((p) => p.id === s.giverId);
+    const carry = Math.round((s.carryMs || 0) / 1000);
+    return { ...base, t: "fbready", key: key(`ready${room.turns || 0}-${s.round}`), round: s.round, rule: rule.title, ruleText: rule.text,
+      giver: giver ? { name: giver.name, color: giver.color, away: !giver.online } : undefined, ...team(s.teamUp),
+      carry: carry > 0 ? `Kept ${carry}s from last round` : undefined,
+      hint: !giver ? "Waiting for someone to give clues" : giver.online ? `${giver.name} starts the clock from their phone` : `${giver.name} seems to be away. Anyone can skip them from their phone.`,
+      recap: recapOf(s.lastTurn), left: s.bowlLeft || 0, total: s.inBowl || 0, board };
+  }
+  if (ph === "turn") {
+    const giver = players.find((p) => p.id === s.giverId);
+    const t = team(s.teamUp);
+    return { ...base, t: "fbturn", key: key(`turn${room.turns || 0}`), round: s.round, giver: giver ? { name: giver.name, color: giver.color } : { name: "Someone" },
+      ...t, heading: `${t.team}, guess out loud!`, rule: `Round ${s.round}: ${rule.title}   ·   ${rule.short}`,
+      got: s.got || [], left: s.bowlLeft || 0, total: s.inBowl || 0, board, secs };
+  }
+  if (ph === "round_over") {
+    const next = FB_ORDER[s.round];
+    const lt = s.lastTurn;
+    const starter = lt?.emptiedBowl && s.giverId && s.giverId === lt.giverId ? lt.giverName : null;
+    return { ...base, t: "fbround", key: key(`round${s.round}`), kicker: `Round ${s.round} of 3 done`, title: "Bowl empty!", table: table(s.round), recap: recapOf(lt),
+      next: next ? { round: s.round + 1, title: FB_RULES[next].title, text: FB_RULES[next].text } : undefined,
+      starter: starter ? `${starter} starts round ${s.round + 1} with the time left on the clock` : undefined,
+      note: host ? `Round ${s.round + 1} starts on its own, or when ${host.name} taps Start` : `Round ${s.round + 1} starts in a moment`, secs };
+  }
+  if (ph === "game_over") {
+    const winners = s.winners || [];
+    const tie = winners.length !== 1;
+    const title = !winners.length ? "Game over" : tie ? `${winners.map((t) => teams[t]?.name).join(" and ")} tie!` : `${teams[winners[0]]?.name ?? "A team"} win!`;
+    const givers = players.filter((p) => p.team >= 0).sort((a, b) => b.score - a.score || a.name.localeCompare(b.name));
+    const bowl = s.finalBowl || [];
+    return { ...base, t: "fbover", key: key("over"), title, ...(tie ? { fill: "0xFFFFFFFF", ink: "0x221836FF" } : team(winners[0])),
+      faces: players.filter((p) => p.team >= 0 && winners.includes(p.team)).map((p) => ({ name: p.name, color: p.color })),
+      table: table(3), givers: givers[0]?.score > 0 ? givers.slice(0, 3).map((p) => ({ name: p.name, color: p.color, score: p.score, ...team(p.team) })) : [],
+      bowl: bowl.slice(0, 22).map((c) => ({ text: c.text, author: c.author || "the bowl" })), more: Math.max(0, bowl.length - 22), cards: bowl.length,
+      note: host ? `Waiting for ${host.name} to start a new game` : undefined };
+  }
+  return null;
+}
+
 const NATIVE = {
   punchline: { name: "Punchline", create: "/api/create-room", ws: "/ws", translate: punchlineScreen },
   imposter: { name: "Imposter", create: "/api/imposter/create-room", ws: "/imposter-ws", translate: imposterScreen },
   "tee-party": { name: "Tee Party", create: "/api/tko/create-room", ws: "/tko-ws", translate: teePartyScreen },
   pirates: { name: "Pirates", create: "/api/pirates/create-room", ws: "/pirates-ws", translate: piratesScreen },
+  fishbowl: { name: "Fishbowl", create: "/api/fishbowl/create-room", ws: "/fishbowl-ws", translate: fishbowlScreen },
 };
 // Dibs's game ids (in "switch" messages) -> the ids the TV and this streamer use (also the web paths).
-const KEY_FOR_GAME = { quiplash: "punchline", imposter: "imposter", tko: "tee-party", brawl: "brawl", piggyback: "piggyback", pirates: "pirates" };
+const KEY_FOR_GAME = { quiplash: "punchline", imposter: "imposter", tko: "tee-party", brawl: "brawl", piggyback: "piggyback", pirates: "pirates", fishbowl: "fishbowl" };
 const tvs = new Set();
 let nroom = null; // { key, g, code, ws, screen, ping, attempts, dead }
 let lastTv = Date.now();

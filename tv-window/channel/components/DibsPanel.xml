@@ -25,15 +25,15 @@
         <Label id="closeHint" translation="[320,950]" width="1280" horizAlign="center" />
       </Group>
       <Group id="pickMode" visible="false">
-        <Poster uri="pkg:/images/dibs_header.png" translation="[260,70]" width="1400" height="150" />
+        <Poster uri="pkg:/images/dibs_header.png" translation="[140,70]" width="1400" height="150" />
         <Group id="resume" visible="false">
           <Poster id="resumeBg" uri="pkg:/images/pill.9.png" height="64" blendColor="0xFF6B57FF" />
           <Label id="resumeText" translation="[0,15]" horizAlign="center" />
         </Group>
         <Group id="tiles" />
-        <Poster id="ring" uri="pkg:/images/ring.9.png" width="472" height="282" />
-        <Label id="pickHint" translation="[260,906]" width="1400" horizAlign="center" />
-        <Label id="pickNote" translation="[260,958]" width="1400" horizAlign="center" />
+        <Poster id="ring" uri="pkg:/images/ring.9.png" width="412" height="248" />
+        <Label id="pickHint" translation="[140,906]" width="1640" horizAlign="center" />
+        <Label id="pickNote" translation="[140,958]" width="1640" horizAlign="center" />
       </Group>
     </Group>
     <DibsNative id="native" visible="false" />

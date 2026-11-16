@@ -90,6 +90,7 @@ export async function renderDibs({ browser, IMG, FONTS, TOOLS }) {
     ["brawl", "Blob Brawl", "Wobbly 3D beasts, last one standing", "2 to 8 players", BLUE, INK],
     ["piggyback", "Piggyback", "Stack up and get the team through the door", "2 to 8 players", "#2DD4A0", INK],
     ["pirates", "Pirates", "Grab and steal words from the pool", "1 to 8 players", "#FFFFFF", INK],
+    ["fishbowl", "Fishbowl", "Two teams race to guess the cards in the bowl", "4 to 16 players", "#FF9A52", INK],
   ];
   for (const [id, name, blurb, players, bg, fg] of games) {
     await shot(`dibs_g_${id}.png`, 440, 250, `<div style="box-sizing:border-box;width:440px;height:250px;border-radius:30px;background:${bg};
@@ -113,6 +114,27 @@ export async function renderDibs({ browser, IMG, FONTS, TOOLS }) {
   await shot("tko_blank.png", 560, 560, `<svg viewBox="0 0 300 300" width="560" height="560">
     <path d="M110 26 Q150 62 190 26 L242 40 L292 92 L256 128 L226 108 L228 284 Q150 292 72 284 L74 108 L44 128 L8 92 L58 40 Z"
       fill="rgba(255,255,255,.45)" stroke="rgba(34,24,54,.35)" stroke-width="6" stroke-linejoin="round"/></svg>`);
+  // Fishbowl pieces (DibsNative.brs): the web's goldfish bowl of slips, a "got it" check, and the winner's crown.
+  const BOWL = "M112 28 H188 Q188 44 202 54 Q232 74 232 110 Q232 162 150 163 Q68 162 68 110 Q68 74 98 54 Q112 44 112 28 Z";
+  const slips = [[108, 140, -14, "#FFF6E8"], [140, 147, 8, "#FFE9A8"], [176, 141, 18, "#FFF6E8"], [124, 128, 22, "#FFD3E8"], [162, 127, -10, "#FFF6E8"]]
+    .map(([x, y, r, f]) => `<g transform="translate(${x} ${y}) rotate(${r})"><rect x="-17" y="-10" width="34" height="20" rx="3" fill="${f}" stroke="${INK}" stroke-width="3"/>
+      <path d="M-9 -2 H9 M-9 4 H3" stroke="${INK}" stroke-width="2.5" stroke-linecap="round"/></g>`).join("");
+  await shot("fb_bowl.png", 330, 300, `<svg viewBox="64 18 172 150" width="330" height="288" style="display:block;margin-top:6px">
+    <defs><clipPath id="g"><path d="${BOWL}"/></clipPath></defs>
+    <path d="${BOWL}" fill="#E8F6FF"/>
+    <g clip-path="url(#g)"><rect x="60" y="74" width="180" height="100" fill="#8FD3FF"/>
+      <path d="M40 76 Q60 68 80 76 T120 76 T160 76 T200 76 T240 76 T280 76 V88 H40 Z" fill="#B9E6FF"/>${slips}
+      <g transform="translate(150 102)"><path d="M-21 0 L-36 -13 L-32 0 L-36 13 Z" fill="#FF9A3C" stroke="${INK}" stroke-width="3.5" stroke-linejoin="round"/>
+        <ellipse cx="0" cy="0" rx="24" ry="14" fill="#FF9A3C" stroke="${INK}" stroke-width="3.5"/>
+        <path d="M-6 -13 Q0 -24 10 -12" fill="#FFC93C" stroke="${INK}" stroke-width="3" stroke-linejoin="round"/>
+        <circle cx="11" cy="-3" r="3.2" fill="${INK}"/><path d="M19 5 Q15 9 10 6" stroke="${INK}" stroke-width="2.5" fill="none" stroke-linecap="round"/></g></g>
+    <path d="M88 96 Q86 76 102 64" fill="none" stroke="#FFFFFF" stroke-width="5" stroke-linecap="round" opacity=".85"/>
+    <path d="${BOWL}" fill="none" stroke="${INK}" stroke-width="5" stroke-linejoin="round"/>
+    <rect x="106" y="22" width="88" height="11" rx="5.5" fill="#E8F6FF" stroke="${INK}" stroke-width="4.5"/></svg>`);
+  await shot("fb_check.png", 48, 48, `<svg viewBox="0 0 48 48" width="48" height="48"><circle cx="24" cy="24" r="20" fill="#2DD4A0" stroke="${INK}" stroke-width="4"/>
+    <path d="M14 25 L21 32 L34 17" fill="none" stroke="${INK}" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/></svg>`);
+  await shot("fb_crown.png", 132, 100, `<svg viewBox="1 3 22 17" width="132" height="102"><path d="M3 8 L7.5 12.5 L12 5 L16.5 12.5 L21 8 L19 18 H5 Z"
+    fill="${YELLOW}" stroke="${INK}" stroke-width="1.6" stroke-linejoin="round"/></svg>`);
   // App dock icons: Dibs (the mascot box) and a generic music glyph for music apps.
   await shot("app_dibs.png", 192, 192, MASCOT.replace('width="112" height="112"', 'width="192" height="192"'));
   await shot("app_music.png", 192, 192, `<svg viewBox="0 0 64 64" width="192" height="192"><g fill="none" stroke="#fff" stroke-width="5" stroke-linecap="round">
