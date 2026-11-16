@@ -72,6 +72,167 @@
     37.44573,
     -118.37656
    ]
+  },
+  {
+   "id": "redrock",
+   "name": "Red Rock",
+   "place": "Nevada, USA",
+   "file": "regions/redrock.json",
+   "bytes": 1036124,
+   "generated": "2026-11-16",
+   "areas": [
+    {
+     "id": "kraft-boulders",
+     "name": "Kraft Boulders",
+     "problems": 370
+    },
+    {
+     "id": "gateway-canyon",
+     "name": "Gateway Canyon",
+     "problems": 131
+    },
+    {
+     "id": "red-spring",
+     "name": "Red Spring",
+     "problems": 107
+    },
+    {
+     "id": "willow-spring",
+     "name": "Willow Spring",
+     "problems": 79
+    },
+    {
+     "id": "first-creek-canyon",
+     "name": "First Creek Canyon",
+     "problems": 67
+    },
+    {
+     "id": "black-velvet-canyon",
+     "name": "Black Velvet Canyon",
+     "problems": 66
+    },
+    {
+     "id": "oak-creek-canyon",
+     "name": "Oak Creek Canyon",
+     "problems": 64
+    },
+    {
+     "id": "pine-creek-canyon",
+     "name": "Pine Creek Canyon",
+     "problems": 62
+    },
+    {
+     "id": "windy-canyon",
+     "name": "Windy Canyon",
+     "problems": 56
+    },
+    {
+     "id": "ash-spring",
+     "name": "Ash Spring",
+     "problems": 50
+    },
+    {
+     "id": "sandstone-quarry",
+     "name": "Sandstone Quarry",
+     "problems": 36
+    },
+    {
+     "id": "white-rock-spring",
+     "name": "White Rock Spring",
+     "problems": 35
+    },
+    {
+     "id": "ice-box-canyon",
+     "name": "Ice Box Canyon",
+     "problems": 34
+    },
+    {
+     "id": "little-springs-canyon",
+     "name": "Little Springs Canyon",
+     "problems": 25
+    },
+    {
+     "id": "mustang-canyon",
+     "name": "Mustang Canyon",
+     "problems": 21
+    },
+    {
+     "id": "first-pullout",
+     "name": "First Pullout",
+     "problems": 19
+    },
+    {
+     "id": "second-pullout",
+     "name": "Second Pullout",
+     "problems": 19
+    },
+    {
+     "id": "southern-outcrops",
+     "name": "Southern Outcrops",
+     "problems": 14
+    },
+    {
+     "id": "juniper-canyon",
+     "name": "Juniper Canyon",
+     "problems": 8
+    },
+    {
+     "id": "guardian-angel-east",
+     "name": "Guardian Angel East",
+     "problems": 2
+    },
+    {
+     "id": "mud-spring-canyon",
+     "name": "Mud Spring Canyon",
+     "problems": 2
+    }
+   ],
+   "boulders": 414,
+   "problems": 1267,
+   "bbox": [
+    36.00552,
+    -115.51068,
+    36.17556,
+    -115.40549
+   ]
+  },
+  {
+   "id": "gunks",
+   "name": "The Gunks",
+   "place": "New York, USA",
+   "file": "regions/gunks.json",
+   "bytes": 306696,
+   "generated": "2026-11-16",
+   "areas": [
+    {
+     "id": "trapps",
+     "name": "Trapps",
+     "problems": 209
+    },
+    {
+     "id": "near-trapps",
+     "name": "Near Trapps",
+     "problems": 47
+    },
+    {
+     "id": "peterskill",
+     "name": "Peterskill",
+     "problems": 39
+    },
+    {
+     "id": "white-dot",
+     "name": "White Dot",
+     "problems": 4
+    }
+   ],
+   "boulders": 41,
+   "problems": 299,
+   "bbox": [
+    41.73493,
+    -74.22052,
+    41.83088,
+    -74.08956
+   ]
   }
  ]
 }

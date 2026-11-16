@@ -147,10 +147,9 @@
   const lists = new Map(Object.entries(store.get("lists", {})).filter(([, v]) => v && v.name));
   const persistLists = () => store.set("lists", Object.fromEntries(lists));
   const listName = (id) => (id === LIST_SAVED ? "Saved" : lists.get(id)?.name ?? "List");
-  function listPids(id) {
-    const ids = id === LIST_SAVED ? [...saved.keys()] : Object.keys(lists.get(id)?.items || {}).map(Number);
-    return ids.filter((p) => P[p]);
-  }
+  // A list can hold climbs from any region; listPids is the part in the region on screen.
+  const allListPids = (id) => (id === LIST_SAVED ? [...saved.keys()] : Object.keys(lists.get(id)?.items || {}).map(Number));
+  const listPids = (id) => allListPids(id).filter((p) => P[p]);
   const inList = (id, pid) => (id === LIST_SAVED ? saved.has(pid) : !!lists.get(id)?.items?.[pid]);
   const emitList = (id) => bus.dispatchEvent(new CustomEvent("lists", { detail: { id, data: lists.get(id) || null } }));
   function createList(name, pids = []) {
@@ -232,7 +231,7 @@
   }
   function replaceSaved(map) {
     saved.clear();
-    for (const [k, v] of Object.entries(map || {})) if (P[+k]) saved.set(+k, v);
+    for (const [k, v] of Object.entries(map || {})) saved.set(+k, v); // every region's, not just this one
     store.set("saved", Object.fromEntries(saved));
     refreshSavedUI();
     refreshMarks();
@@ -734,7 +733,9 @@
         if (store.get("sort", null) == null) { state.sort = "near"; $("#sort").value = "near"; }
       } else {
         const c = regionBounds().getCenter();
-        toast(`You’re ${fmtDist(distM({ lat, lon }, { lat: c.lat, lon: c.lng }))} from ${REG.name}. Distances are straight-line.`, 5000);
+        const closer = IDX.regions.filter((r) => r.id !== REG.id).map((r) => ({ r, d: distM({ lat, lon }, regionCenter(r)) })).sort((a, b) => a.d - b.d)[0];
+        if (closer && closer.d < 60000) toast(`You’re near ${closer.r.name}. Tap ${REG.name} at the top to switch regions.`, 6000);
+        else toast(`You’re ${fmtDist(distM({ lat, lon }, { lat: c.lat, lon: c.lng }))} from ${REG.name}. Distances are straight-line.`, 5000);
       }
     }
     updateLocStatus();
@@ -892,8 +893,10 @@
           const areas = [...new Set(pids.map((p) => A[B[P[p].boulder].area]?.name).filter(Boolean))];
           const nB = new Set(pids.map((p) => P[p].boulder)).size;
           const allDl = pids.length && pids.every((p) => downloaded.has(p));
+          const away = allListPids(id).length - pids.length;
           const meta = pids.length
-            ? `${plural(pids.length, "climb")} on ${plural(nB, "boulder")}${areas.length ? ` · ${esc(areas.slice(0, 2).join(", "))}${areas.length > 2 ? "…" : ""}` : ""}`
+            ? `${plural(pids.length, "climb")} on ${plural(nB, "boulder")}${areas.length ? ` · ${esc(areas.slice(0, 2).join(", "))}${areas.length > 2 ? "…" : ""}` : ""}${away ? ` · +${away} elsewhere` : ""}`
+            : away ? `${plural(away, "climb")} in other regions`
             : id === LIST_SAVED ? "Tap Save on any problem to add it here" : "Empty: add climbs from any problem";
           return `<li><button class="item" data-go="list/${id}"><span class="licon${id === LIST_SAVED ? " saved" : ""}">${id === LIST_SAVED ? ICON.saved : ICON.list}</span><span class="main"><span class="name">${esc(listName(id))}${allDl ? `<span class="mark dl" title="Downloaded">${ICON.done}</span>` : ""}</span><span class="meta">${meta}</span></span><span class="chev" aria-hidden="true">›</span></button></li>`;
         }).join("") +
@@ -1173,6 +1176,7 @@
         <div><b>Works with no signal</b><ul><li>Trail map &amp; every boulder</li><li>All problems, grades &amp; notes</li><li>Boulder drawings</li><li>Your GPS location (needs no data)</li><li>Saved &amp; downloaded climbs</li></ul></div>
         <div><b>Needs signal</b><ul><li>Satellite view</li><li>Playing beta videos</li><li>Syncing saved climbs</li></ul></div>
       </div>
+      ${IDX.regions.length > 1 ? `<h4>Regions on this device</h4><ul class="oregions">${(await Promise.all(IDX.regions.map(async (r) => ({ r, ok: "caches" in window && !!(await caches.match(`data/${r.file}`).catch(() => null)) })))).map(({ r, ok }) => `<li><span><b>${esc(r.name)}</b><span class="muted">${r.problems.toLocaleString()} problems · ${(r.bytes / 1048576).toFixed(1)} MB</span></span>${ok ? `<span class="ok">${ICON.done}Saved</span>` : `<button class="pill" data-act="save-region-file" data-file="${esc(r.file)}">${ICON.dl}<span>Save</span></button>`}</li>`).join("")}</ul>` : ""}
       <p><b>${plural(downloaded.size, "climb")} downloaded</b> with beta video lists for offline.${persisted ? " Storage is protected from automatic cleanup." : ""}</p>
       <h4>Use it like an app</h4>
       ${install}
@@ -1189,6 +1193,7 @@
   // the numbered pins read like a circuit.
   let pinLayer = null;
   const currentListPids = () => (state.listView?.shared ? state.listView.shared.pids.filter((p) => P[p]) : listPids(state.listView?.id));
+  // (shared.pids keeps climbs from every region; P only has this region's)
   function listOrder(pids) {
     const byB = new Map();
     for (const pid of pids) {
@@ -1255,13 +1260,14 @@
     const groups = listOrder(pids);
     const nDl = pids.filter((p) => downloaded.has(p)).length;
     const areas = [...new Set(groups.map((g) => A[g.b.area]?.name).filter(Boolean))];
+    const awayN = (shared ? v.shared.pids : allListPids(v.id)).filter((p) => !P[p]).length;
     $("#listpane").innerHTML = `
       <div class="dhead">
         <div class="dtop">
           <button class="back" data-act="lists-back" aria-label="Back to lists"><svg viewBox="0 0 24 24"><path d="m15 5-7 7 7 7" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>Lists</button>
           <h2>${esc(name)}</h2>
         </div>
-        <div class="dsub">${shared ? "Shared with you · " : ""}${plural(pids.length, "climb")} on ${plural(groups.length, "boulder")}${areas.length ? ` · ${esc(areas.join(", "))}` : ""}</div>
+        <div class="dsub">${shared ? "Shared with you · " : ""}${pids.length || !awayN ? `${plural(pids.length, "climb")} on ${plural(groups.length, "boulder")}${areas.length ? ` · ${esc(areas.join(", "))}` : ""}${awayN ? ` · +${awayN} in other regions` : ""}` : `${plural(awayN, "climb")} in other regions`}</div>
         <div class="acts lacts">
           ${shared ? `<button class="pill solid" data-act="keep-shared">${ICON.plus}<span>Save to my lists</span></button>` : ""}
           ${groups.length ? `<button class="pill" data-act="map-list">${ICON.map}<span>Fit map</span></button>` : ""}
@@ -1276,8 +1282,20 @@
             <button class="lbh" data-go="b/${g.b.id}"><span class="pinno">${i + 1}</span><span class="main"><span class="name">${esc(g.b.name)}</span><span class="meta">${esc(A[g.b.area]?.name ?? "")}${g.b.sector && g.b.sector !== A[g.b.area]?.name ? ` · ${esc(g.b.sector)}` : ""}</span></span>${distCell(g.b)}</button>
             <ul>${g.ps.map((p) => `<li><button class="lp" data-go="p/${p.id}">${gradeHTML(p)}<span class="main"><span class="name">${esc(p.name)}${safetyHTML(p)}${downloaded.has(p.id) ? `<span class="mark dl" title="Downloaded">${ICON.done}</span>` : ""}</span><span class="meta">${starsHTML(p.stars)}${votesHTML(p.votes)}${p.height_ft ? ` · ${p.height_ft} ft` : ""}${p.videos?.length ? ` · <span class="vids">${ICON.play}${p.videos.length}</span>` : ""}</span></span></button>${shared ? "" : `<button class="rm" data-act="rm-from-list" data-pid="${p.id}" aria-label="Remove ${esc(p.name)} from this list">×</button>`}</li>`).join("")}</ul>
           </li>`).join("") || `<li class="empty">${v.id === LIST_SAVED ? "Nothing saved yet. Open any problem and tap <b>Save</b>." : "This list is empty. Open any problem and tap <b>Add to list</b>."}</li>`}
-      </ol>`;
+      </ol>
+      <div class="elsewhere" hidden></div>`;
     drawListPins(groups);
+    // Climbs on this list from other regions: one button per region.
+    const away = (shared ? v.shared.pids : allListPids(v.id)).filter((p) => !P[p]);
+    if (away.length) {
+      if (!groups.length) $("#listpane .llist").innerHTML = `<li class="empty">All of this list’s climbs are in other regions.</li>`;
+      regionsOf(away).then((m) => {
+        const el = $("#listpane .elsewhere");
+        if (!el || state.listView !== v || !m.size) return;
+        el.innerHTML = [...m].map(([rid, n]) => `<button class="item" data-act="list-region" data-region="${rid}"><span class="main"><span class="name">${plural(n, "more climb")} in ${esc(regionName(rid))}</span><span class="meta">Open ${esc(regionName(rid))} to see them on the map</span></span><span class="chev" aria-hidden="true">›</span></button>`).join("");
+        el.hidden = false;
+      });
+    }
     return groups;
   }
   function openList(view) {
@@ -1325,7 +1343,17 @@
   function openShared(nameEnc, idsEnc) {
     let name = "Shared list";
     try { name = b64u.dec(nameEnc).slice(0, 60) || name; } catch { /* keep the default name */ }
-    const pids = [...new Set(idsEnc.split(".").map((x) => parseInt(x, 36)))].filter((p) => P[p]);
+    const pids = [...new Set(idsEnc.split(".").map((x) => parseInt(x, 36)))].filter((p) => p > 0);
+    // A list from another region opens there (most of its climbs decide).
+    const here = pids.filter((p) => P[p]).length;
+    if (here < pids.length / 2) {
+      regionsOf(pids).then((m) => {
+        const [best, n] = [...m][0] || [];
+        if (best && n > here) switchRegion(best, location.hash.slice(1));
+        else openList({ shared: { name, pids } });
+      });
+      return;
+    }
     openList({ shared: { name, pids } });
   }
   async function shareList(name, pids) {
@@ -1393,9 +1421,10 @@
     const [kind, idStr] = parts;
     const id = +idStr;
     if (kind === "p" && P[id]) openBoulder(P[id].boulder, id);
-    else if (kind === "b" && B[id]) openBoulder(id, null);
+    else if ((kind === "b" || kind === "p") && B[id]) openBoulder(id, null);
     else if (kind === "list" && (idStr === LIST_SAVED || lists.has(idStr))) openList({ id: idStr });
     else if (kind === "share" && parts.length >= 3) openShared(parts[1], parts[2]);
+    else if ((kind === "p" || kind === "b") && id) openElsewhere([id], location.hash.slice(1));
     else {
       if (state.listView) clearListMode();
       closeDetail();
@@ -1581,6 +1610,7 @@
     const m = $("#acctmenu");
     m.hidden = forceOpen ? false : !m.hidden;
     if (m.hidden) return;
+    $("#regionmenu").hidden = true;
     if (!state.user) {
       m.innerHTML = `<p><b>Sign in to sync your lists</b><br><span class="muted">Saved climbs and your lists follow you to every device. Downloads stay on each device.</span></p><div class="gbtn" id="gbtn"></div>`;
       window.AtlasAuth?.signIn($("#gbtn"));
@@ -1696,6 +1726,7 @@
         return;
       }
       if (a === "rm-from-list") return setInList(v.id, +act.dataset.pid, false);
+      if (a === "list-region") return switchRegion(act.dataset.region, location.hash.slice(1) || (v.id ? `list/${v.id}` : ""));
       if (a === "keep-shared") {
         const id = createList(v.shared.name, pids);
         toast(`Saved “${v.shared.name}” to your lists.`);
@@ -1751,10 +1782,16 @@
     $("#btn-fit").addEventListener("click", () => (state.area !== "all" ? fitArea(state.area) : fitRegion()));
     $("#btn-offline").addEventListener("click", openOffline);
     $("#btn-account").addEventListener("click", () => accountMenu());
-    // Tapping anywhere outside the account menu closes it.
+    $("#btn-region").addEventListener("click", () => regionMenu());
+    $("#regionmenu").addEventListener("click", (e) => {
+      const b = e.target.closest("[data-region]");
+      if (b) switchRegion(b.dataset.region);
+    });
+    // Tapping anywhere outside a menu closes it.
     document.addEventListener("pointerdown", (e) => {
-      const m = $("#acctmenu");
+      const m = $("#acctmenu"), r = $("#regionmenu");
       if (!m.hidden && !e.target.closest("#acctmenu, #btn-account")) m.hidden = true;
+      if (!r.hidden && !e.target.closest("#regionmenu, #btn-region")) { r.hidden = true; $("#btn-region").setAttribute("aria-expanded", "false"); }
     });
     // iPhone: don't let a pinch on the page chrome (outside the map) zoom the whole page.
     document.addEventListener("gesturestart", (e) => { if (!e.target.closest?.("#map")) e.preventDefault(); });
@@ -1766,11 +1803,19 @@
       if (e.target.id === "offline" || a === "close") { $("#offline").hidden = true; return; }
       if (a === "install" && installPrompt) { installPrompt.prompt(); installPrompt = null; setTimeout(renderOffline, 1500); }
       if (a === "save-region") { await cacheRegion(); persistStorage(); renderOffline(); }
+      if (a === "save-region-file") {
+        const btn = e.target.closest("[data-act]");
+        btn.disabled = true;
+        try { await (await caches.open("atlas-data")).add(`data/${btn.dataset.file}`); persistStorage(); }
+        catch { toast("Couldn’t save that region. Try again with signal."); }
+        renderOffline();
+      }
     });
     addEventListener("hashchange", route_);
     addEventListener("keydown", (e) => {
       if (e.key === "Escape") {
-        if (!$("#picker").hidden) $("#picker").hidden = true;
+        if (!$("#regionmenu").hidden) $("#regionmenu").hidden = true;
+        else if (!$("#picker").hidden) $("#picker").hidden = true;
         else if (!$("#offline").hidden) $("#offline").hidden = true;
         else if (state.sel) back();
         else if (state.listView) listsBack();
@@ -1780,9 +1825,68 @@
     addEventListener("offline", onNet);
   }
 
-  let REG_FILE = "";
+  let REG_FILE = "", IDX = null;
+  const regionCenter = (r) => ({ lat: (r.bbox[0] + r.bbox[2]) / 2, lon: (r.bbox[1] + r.bbox[3]) / 2 });
+
+  // Open another region: the page reloads into it (with an optional route, e.g. a list or climb).
+  async function switchRegion(id, route = "") {
+    const r = IDX?.regions.find((x) => x.id === id);
+    if (!r || (REG && id === REG.id)) { $("#regionmenu").hidden = true; return false; }
+    if (!navigator.onLine && "caches" in window && !(await caches.match(`data/${r.file}`).catch(() => null))) {
+      toast(`${r.name} isn’t saved on this device yet. Open it once with signal (or save it from the download menu).`, 5000);
+      return false;
+    }
+    store.set("region", id);
+    history.replaceState(null, "", location.pathname + location.search + (route ? `#${route}` : ""));
+    document.body.classList.add("switching");
+    location.reload();
+    return true;
+  }
+  function regionMenu(forceOpen) {
+    const m = $("#regionmenu");
+    m.hidden = forceOpen ? false : !m.hidden;
+    $("#btn-region").setAttribute("aria-expanded", String(!m.hidden));
+    if (m.hidden) return;
+    $("#acctmenu").hidden = true;
+    const rs = [...IDX.regions];
+    if (state.me) rs.sort((a, b) => distM(state.me, regionCenter(a)) - distM(state.me, regionCenter(b)));
+    m.innerHTML = `<p class="rmh"><b>Regions</b><span class="muted">${rs.length} in the atlas so far</span></p>
+      <ul class="rlist">${rs.map((r) => {
+        const here = r.id === REG.id;
+        const far = state.me ? fmtDist(distM(state.me, regionCenter(r))) : "";
+        return `<li><button data-region="${r.id}" class="${here ? "on" : ""}"${here ? ' aria-current="true"' : ""}><span class="main"><span class="name">${esc(r.name)}</span><span class="meta">${esc(r.place)} · ${r.problems.toLocaleString()} problems</span></span>${here ? `<span class="here">${ICON.done}</span>` : far ? `<span class="dist">${far}</span>` : `<span class="chev" aria-hidden="true">›</span>`}</button></li>`;
+      }).join("")}</ul>`;
+  }
+  // Which region each climb (or boulder) id lives in, loaded only when something points elsewhere.
+  let idsIndex = null;
+  async function regionsOf(ids) {
+    if (!idsIndex) {
+      try {
+        const raw = await (await fetch("data/ids.json")).json();
+        idsIndex = new Map();
+        for (const [rid, packed] of Object.entries(raw)) for (const x of packed.split(".")) idsIndex.set(parseInt(x, 36), rid);
+      } catch { return new Map(); }
+    }
+    const out = new Map();
+    for (const id of ids) {
+      const r = idsIndex.get(+id);
+      if (r && r !== REG.id) out.set(r, (out.get(r) || 0) + 1);
+    }
+    return new Map([...out].sort((a, b) => b[1] - a[1]));
+  }
+  const regionName = (id) => IDX?.regions.find((r) => r.id === id)?.name ?? id;
+  // A link to a climb, boulder or list in another region opens that region.
+  async function openElsewhere(ids, route) {
+    const best = [...(await regionsOf(ids)).keys()][0];
+    if (!best || !(await switchRegion(best, route))) {
+      history.replaceState(null, "", location.pathname + location.search);
+      closeDetail();
+    }
+  }
+
   async function main() {
     const idx = await (await fetch("data/regions.json")).json();
+    IDX = idx;
     const region = idx.regions.find((r) => r.id === store.get("region", idx.regions[0].id)) || idx.regions[0];
     REG_FILE = `data/${region.file}`;
     REG = await (await fetch(REG_FILE)).json();
@@ -1790,9 +1894,9 @@
     REG.boulders.forEach((b) => (B[b.id] = b));
     REG.areas.forEach((a) => (A[a.id] = a));
     REG.problems = REG.problems.filter((p) => B[p.boulder]);
-    for (const id of [...saved.keys()]) if (!P[id]) saved.delete(id);
     $("#gen").textContent = new Date(REG.generated + "T12:00:00").toLocaleDateString(undefined, { month: "short", year: "numeric" });
     $("#subtitle").textContent = `${REG.name} · ${REG.problems.length.toLocaleString()} problems`;
+    $("#btn-region").title = IDX.regions.length > 1 ? "Switch region" : REG.name;
     document.title = `Boulder Atlas · ${REG.name}`;
     renderChips();
     renderAreaSelect();

@@ -3,8 +3,18 @@
 **Live:** https://tonyxin.com/sites/boulder-atlas/ (the old `/sites/buttermilks/` link redirects here)
 
 An offline-first map of bouldering areas, built to grow into an atlas of the world's bouldering.
-It starts with **Bishop, CA**: 1,527 problems on 339 boulders across 11 areas (Buttermilks, Happy &
-Sad Boulders, Druid Stones, and smaller spots).
+Regions so far (tap the region name under the title to switch):
+
+- **Bishop, CA**: 1,527 problems on 339 boulders across 11 areas (Buttermilks, Happy & Sad
+  Boulders, Druid Stones, and smaller spots).
+- **Red Rock, NV**: 1,267 problems on 414 boulders across 21 areas (Kraft Boulders, Gateway
+  Canyon, Red Spring, Ash Spring and the rest of Calico Basin, plus every Scenic Drive canyon:
+  Sandstone Quarry, Willow Spring, Ice Box, Pine Creek, Oak Creek, First Creek, Black Velvet,
+  Windy Canyon and more).
+- **The Gunks, NY**: 299 problems across the Trapps, Near Trapps, Peterskill and White Dot.
+
+Saved climbs and lists can hold climbs from any region; a link to a climb or list in another
+region opens that region (`data/ids.json` says which region each climb is in).
 
 - **Atlas map**: zoomed out, each area is a labeled pill; tap one to fly in. Boulders are drawn at
   real-world size as map shapes (they scale smoothly while zooming). Roads, 4WD tracks and climber
@@ -40,10 +50,13 @@ Firebase → Authentication → Settings → Authorized domains.
 ## Data
 
 Generated, not hand-edited: `data/regions.json` (the atlas index) and one file per region in
-`data/regions/`. To rebuild Bishop:
+`data/regions/`, plus `data/ids.json` (climb/boulder id → region, rewritten on every build).
+To rebuild Bishop:
 
 ```sh
-# 1. Mountain Project route-finder CSV exports (type=boulder), one per sub-area (each export caps at 1000 rows)
+# 1. Mountain Project route-finder CSV exports (type=boulder); big areas are split into sub-areas
+#    automatically because one export caps at 1000 rows
+python3 -I tools/export_boulders.py /tmp/mp-csv https://www.mountainproject.com/area/106064825/bishop-area
 # 2. Crawl the region's boulder areas + problem pages (cached; ~1 request/sec)
 python3 -I tools/crawl_region.py /tmp/mp-cache /tmp/mp-csv https://www.mountainproject.com/area/106064825/bishop-area
 # 3. Titles for the beta videos (oEmbed; drops deleted/private videos)
@@ -55,6 +68,16 @@ python3 -I tools/build_region.py --cache /tmp/mp-cache --csv /tmp/mp-csv --osm /
 # 5. OpenStreetMap paths for every area (uses the built region to pick bounding boxes), then build again
 python3 -I tools/fetch_paths.py data/regions/bishop.json /tmp/osm.json
 ```
+
+Other regions use the same steps with their own root area and naming options:
+
+| Region | Root area | Extra build options |
+| --- | --- | --- |
+| `redrock` "Red Rock", Nevada, USA | `area/114274150/red-rock-boulders` (Mountain Project keeps Red Rock's bouldering apart from its routes) | `--split "Calico Basin Boulders" --strip '\s+(Boulders\|Bouldering\|Area)$' --rename "Kraft=Kraft Boulders"` |
+| `gunks` "The Gunks", New York, USA | `area/105798167/the-gunks` | `--strip '\s+(Boulders\|Bouldering\|Area)$' --rename "The Trapps=Trapps" --rename "The Near Trapps=Near Trapps"` |
+
+`--split` makes a top-level area's sub-areas the atlas areas, `--strip` trims area names and
+`--rename` merges or renames areas.
 
 Only facts are kept (names, grades, stars, heights, GPS, first ascent, the short "Location" note,
 links to climbers' videos); full write-ups stay on Mountain Project, linked from every problem.

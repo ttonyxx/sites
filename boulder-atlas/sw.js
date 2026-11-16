@@ -6,14 +6,14 @@
 // App files and data are served from the cache right away and refreshed in the background
 // (stale-while-revalidate). When a refresh brings a new version, open pages are told so they can
 // switch to it.
-const SHELL = "atlas-shell-v17";
+const SHELL = "atlas-shell-v18";
 const FILES = [
   "./", "index.html", "style.css", "app.js", "auth.js", "firebase-config.js", "manifest.webmanifest", "icon.svg",
   "icons/apple-touch-icon.png", "icons/icon-192.png", "icons/icon-512.png",
   "vendor/leaflet/leaflet.js", "vendor/leaflet/leaflet.css",
   "vendor/fonts/barlow-400.woff2", "vendor/fonts/barlow-500.woff2", "vendor/fonts/barlow-600.woff2", "vendor/fonts/barlow-700.woff2",
   "vendor/fonts/barlow-semi-condensed-600.woff2", "vendor/fonts/barlow-semi-condensed-700.woff2",
-  "data/regions.json",
+  "data/regions.json", "data/ids.json",
 ];
 
 self.addEventListener("install", (e) => {

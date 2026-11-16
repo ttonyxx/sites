@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
   <title>Boulder Atlas</title>
-  <meta name="description" content="An offline-first map of bouldering areas: every problem, beta videos, your live location, and boulders drawn to scale. Starting with Bishop, CA.">
+  <meta name="description" content="An offline-first map of bouldering areas: every problem, beta videos, your live location, and boulders drawn to scale. Bishop, Red Rock and the Gunks so far.">
   <meta name="theme-color" content="#ede4d3">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -25,13 +25,14 @@
   <header class="topbar">
     <div class="brand">
       <svg viewBox="0 0 32 32" aria-hidden="true"><path d="M4 25c1-6 4-11 9-13 3-1 4-5 8-5 4 0 7 6 7 11 0 4-1 6-1 7z" fill="#c9a77c" stroke="#2d2620" stroke-width="2" stroke-linejoin="round"/><path d="M15 25c.5-4 1.5-7 3-10" stroke="#1d6fd1" stroke-width="2.2" fill="none" stroke-linecap="round"/></svg>
-      <div>
-        <h1>Boulder Atlas</h1>
-        <p id="subtitle">Loading…</p>
-      </div>
+      <button id="btn-region" class="regionbtn" aria-haspopup="true" aria-expanded="false">
+        <span class="h1">Boulder Atlas</span>
+        <span class="sub"><span id="subtitle">Loading…</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 10 5 5 5-5" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+      </button>
       <button id="btn-account" class="acct" hidden aria-label="Account"></button>
     </div>
     <div id="acctmenu" class="acctmenu" hidden></div>
+    <div id="regionmenu" class="acctmenu regionmenu" hidden></div>
     <div id="netstatus" class="locstatus off" hidden>Offline · using saved map</div>
     <div id="locstatus" class="locstatus" hidden></div>
   </header>

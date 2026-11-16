@@ -33,11 +33,14 @@ ap.add_argument("--place", required=True)
 ap.add_argument("--videos")
 ap.add_argument("--outlines")
 ap.add_argument("--out", required=True)
+ap.add_argument("--split", action="append", default=[], help="top-level MP area whose sub-areas are the real areas")
+ap.add_argument("--rename", action="append", default=[], help="'MP name=Atlas name' for an area")
+ap.add_argument("--strip", default=r"\s+(Bouldering|Area)$", help="regex removed from the end of area names")
 args = ap.parse_args()
 
 # Top-level Mountain Project areas that are really groups of separate bouldering areas.
-SPLIT = {"Volcanic Tablelands (Happy/Sad Boulders)"}
-RENAME = {"Buttermilk Country": "Buttermilks"}
+SPLIT = {"Volcanic Tablelands (Happy/Sad Boulders)", *args.split}
+RENAME = {"Buttermilk Country": "Buttermilks", **dict(r.split("=", 1) for r in args.rename)}
 
 
 def key(url):
@@ -227,8 +230,9 @@ def walk(url, trail):
     here = trail + [name]
     if rows and len(here) > 1:
         top = here[1]
-        area_name = here[2] if top in SPLIT and len(here) > 2 else RENAME.get(top, top)
-        area_name = re.sub(r"\s+(Bouldering|Area)$", "", area_name)
+        area_name = here[2] if top in SPLIT and len(here) > 2 else top
+        area_name = re.sub(args.strip, "", RENAME.get(area_name, area_name))
+        area_name = RENAME.get(area_name, area_name)
         aid = slug(area_name)
         if aid not in areas:
             areas[aid] = {"id": aid, "name": area_name, "url": None}
@@ -403,6 +407,25 @@ entry = {
 }
 idx["regions"] = [r for r in idx["regions"] if r["id"] != args.id] + [entry]
 json.dump(idx, open(idx_file, "w"), indent=1, ensure_ascii=False)
+
+
+def b36(n):
+    digits, out = "0123456789abcdefghijklmnopqrstuvwxyz", ""
+    while True:
+        n, r = divmod(n, 36)
+        out = digits[r] + out
+        if not n:
+            return out
+
+
+# Which region every climb and boulder id is in, so a link into another region can open it.
+ids = {}
+for r in idx["regions"]:
+    f = os.path.join(args.out, r["file"])
+    if os.path.exists(f):
+        d = json.load(open(f, encoding="utf-8"))
+        ids[r["id"]] = ".".join(b36(n) for n in sorted({p["id"] for p in d["problems"]} | {b["id"] for b in d["boulders"]}))
+json.dump(ids, open(os.path.join(args.out, "ids.json"), "w"), separators=(",", ":"))
 
 nv = sum(len(p.get("videos", [])) for p in problems)
 print(f"{args.name}: {len(area_list)} areas, {len(boulders)} boulders, {len(problems)} problems, "
