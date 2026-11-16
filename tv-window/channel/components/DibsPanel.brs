@@ -220,6 +220,7 @@ sub closePanel()
     m.autoClose.control = "stop"
     m.top.open = false
     m.top.visible = false
+    m.top.setFocus(false) ' let go, or a real Roku keeps sending the remote to this hidden panel
     m.top.closed = true
 end sub
 
@@ -670,6 +671,7 @@ sub parkGame(closeAfter as Boolean)
         m.mode = "card"
         m.top.open = false
         m.top.visible = false
+        m.top.setFocus(false)
         m.top.parked = true
         m.top.closed = true
     end if
@@ -712,6 +714,8 @@ end sub
 
 ' The TV may keep Back for itself, so Replay and * also work.
 function onKeyEvent(key as String, press as Boolean) as Boolean
+    ' Hidden, this panel never eats keys: they go on to the dashboard (on the TV, focus can outlive closing).
+    if not m.top.visible then return false
     if not press then return true
     leave = (key = "back") or (key = "replay")
     if m.mode = "card"

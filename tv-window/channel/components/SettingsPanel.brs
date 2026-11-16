@@ -63,6 +63,7 @@ end sub
 sub closePanel()
     m.top.open = false
     m.top.visible = false
+    m.top.setFocus(false) ' let go, or a real Roku keeps sending the remote to this hidden panel
     m.top.closed = true
 end sub
 
@@ -287,6 +288,7 @@ sub onGeoResult()
 end sub
 
 function onKeyEvent(key as String, press as Boolean) as Boolean
+    if not m.top.visible then return false ' hidden: the keys belong to the dashboard
     if not press then return true
     n = m.items.Count()
     if key = "up"
@@ -301,7 +303,7 @@ function onKeyEvent(key as String, press as Boolean) as Boolean
         end if
     else if key = "OK"
         activate()
-    else if key = "back"
+    else if key = "back" or key = "replay" ' the TV keeps Back for itself, so Replay does the same
         if m.mode = "main"
             closePanel()
         else

@@ -752,6 +752,7 @@ sub renderDockBadge()
 end sub
 
 sub onDibsParked()
+    if m.dibs.live = "" then return ' a sample screen, not a room
     showToast(m.dibs.live + " is still running   " + Chr(183) + "   Down, then OK on Dibs to go back")
 end sub
 
@@ -846,7 +847,11 @@ sub openSettings()
     Fade(m.top.findNode("hints"), 0.0, 0.2)
 end sub
 
+' A panel closed. On a real Roku the Scene can't take focus while a hidden panel still holds it, so make
+' both panels let go first (the simulator doesn't need this).
 sub onSettingsClosed()
+    m.settings.setFocus(false)
+    m.dibs.setFocus(false)
     m.top.setFocus(true)
     showHints()
 end sub
