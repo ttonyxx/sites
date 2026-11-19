@@ -549,6 +549,23 @@ html.ios-gap .topbar, html.ios-gap .mapbtns, html.ios-gap .toast { position: abs
 .chip[aria-pressed="true"] { box-shadow: 0 2px 8px color-mix(in srgb, var(--c) 35%, transparent); }
 .where .arrow { transition: transform .5s var(--spring); }
 
+/* ------------------------------------------------------------------ ticks */
+.pill.tick.on { background: #2e7d32; border-color: #2e7d32; color: #fff; }
+.pill.tick.on svg { color: #fff; }
+.mark.ticked { display: inline-grid; place-items: center; width: 17px; height: 17px; border-radius: 50%; background: #2e7d32; color: #fff; vertical-align: -3px; }
+.mark.ticked svg { width: 12px; height: 12px; }
+.tickpanel { margin-top: 8px; display: flex; align-items: center; flex-wrap: wrap; gap: 6px 14px; background: #eef7ee; border: 1px solid #cfe5cf; border-radius: 12px; padding: 9px 12px; }
+.tickpanel:not([hidden]) { animation: pop-in .26s var(--ease) backwards; }
+.tickdate { display: flex; align-items: center; gap: 10px; font-weight: 600; color: #1f5e23; margin-right: auto; }
+.tickdate span { display: inline-flex; align-items: center; gap: 4px; }
+.tickdate span svg { width: 17px; height: 17px; }
+.tickdate input { font: 600 16px var(--sans); color: var(--ink); background: #fff; border: 1px solid #cfe5cf; border-radius: 9px; padding: 6px 9px; min-height: 38px; }
+.tickpanel .link { font-weight: 600; }
+.tickpanel .link.danger { color: #a61b1b; }
+.licon.ticks { background: #2e7d32; color: #fff; }
+.lp .sent { display: inline-flex; align-items: center; gap: 2px; color: #2e7d32; font-weight: 600; }
+.lp .sent svg { width: 14px; height: 14px; }
+
 /* ------------------------------------------------------------------ desktop */
 @media (min-width: 900px) {
   .sheet {

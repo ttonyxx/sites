@@ -144,9 +144,29 @@
   // Lists. "Saved" (the `saved` map above) is the default list; these are your own.
   // id -> { name, items: {problemId: addedAt}, updated }
   const LIST_SAVED = "saved";
+  const LIST_TICKS = "ticks"; // built in: {problemId: day you sent it (local noon, ms)}
   const lists = new Map(Object.entries(store.get("lists", {})).filter(([, v]) => v && v.name));
   const persistLists = () => store.set("lists", Object.fromEntries(lists));
-  const listName = (id) => (id === LIST_SAVED ? "Saved" : lists.get(id)?.name ?? "List");
+  const userListIds = () => [...lists.keys()].filter((id) => id !== LIST_TICKS);
+  const listName = (id) => (id === LIST_SAVED ? "Saved" : id === LIST_TICKS ? "Ticks" : lists.get(id)?.name ?? "List");
+  // Ticks: the day each climb was sent.
+  const tickedOn = (pid) => lists.get(LIST_TICKS)?.items?.[pid] || null;
+  const pad2 = (n) => String(n).padStart(2, "0");
+  const isoDay = (ms) => { const d = new Date(ms); return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`; };
+  const dayMs = (iso) => { const [y, m, d] = iso.split("-").map(Number); return new Date(y, m - 1, d, 12).getTime(); };
+  const todayMs = () => dayMs(isoDay(Date.now()));
+  const fmtDay = (ms) => new Date(ms).toLocaleDateString(undefined, { month: "short", day: "numeric", ...(new Date(ms).getFullYear() !== new Date().getFullYear() ? { year: "numeric" } : {}) });
+  function setTick(pid, ms) {
+    let l = lists.get(LIST_TICKS);
+    if (!l) { l = { name: "Ticks", items: {}, updated: 0 }; lists.set(LIST_TICKS, l); }
+    if (ms) l.items[pid] = ms;
+    else delete l.items[pid];
+    l.updated = Date.now();
+    persistLists();
+    emitList(LIST_TICKS);
+    refreshSavedUI();
+    refreshMarks(pid);
+  }
   // A list can hold climbs from any region; listPids is the part in the region on screen.
   const allListPids = (id) => (id === LIST_SAVED ? [...saved.keys()] : Object.keys(lists.get(id)?.items || {}).map(Number));
   const listPids = (id) => allListPids(id).filter((p) => P[p]);
@@ -191,10 +211,12 @@
     refreshMarks();
   }
   // Marks shown next to a climb's name: in Saved (gold), in your lists (blue), downloaded (green).
-  const listsWith = (pid) => [...lists.keys()].filter((id) => lists.get(id).items?.[pid]);
+  const listsWith = (pid) => userListIds().filter((id) => lists.get(id).items?.[pid]);
   function marksHTML(pid) {
     const ls = listsWith(pid);
     let h = "";
+    const t = tickedOn(pid);
+    if (t) h += `<span class="mark ticked" title="Sent ${esc(fmtDay(t))}">${ICON.done}</span>`;
     if (saved.has(pid)) h += `<span class="mark saved" title="In Saved">${ICON.saved}</span>`;
     if (ls.length) h += `<span class="mark inlist" title="In ${esc(ls.map(listName).join(", "))}">${ICON.list}${ls.length > 1 ? `<b>${ls.length}</b>` : ""}</span>`;
     if (downloaded.has(pid)) h += `<span class="mark dl" title="Downloaded">${ICON.done}</span>`;
@@ -237,19 +259,45 @@
     refreshMarks();
   }
   function refreshSavedUI() {
-    $("#n-lists").textContent = lists.size + 1;
+    $("#n-lists").textContent = userListIds().length + 2;
     if (state.listView) renderListPane();
     else if (state.tab === "lists") renderList();
     if (state.sel) {
+      $$("#detail [data-act=tick]").forEach((b) => paintTick(b, +b.dataset.pid));
+      $$("#detail .tickpanel:not([hidden])").forEach((el) => { if (!el.contains(document.activeElement)) renderTickPanel(el); });
       $$("#detail [data-act=save]").forEach((b) => paintSave(b, +b.dataset.pid));
       $$("#detail [data-act=addlist]").forEach((b) => paintAddList(b, +b.dataset.pid));
     }
     $$("#detail .inpick:not([hidden])").forEach((el) => { if (!el.contains(document.activeElement)) renderInlinePicker(el); });
   }
   function paintAddList(btn, pid) {
-    const n = [...lists.keys()].filter((id) => inList(id, pid)).length;
+    const n = userListIds().filter((id) => inList(id, pid)).length;
     btn.classList.toggle("on", n > 0);
     btn.innerHTML = `${ICON.list}<span>${n ? `In ${plural(n, "list")}` : "Add to list"}</span>`;
+  }
+  function paintTick(btn, pid) {
+    const t = tickedOn(pid);
+    btn.classList.toggle("on", !!t);
+    btn.innerHTML = `${ICON.done}<span>${t ? `Sent ${esc(fmtDay(t))}` : "Tick"}</span>`;
+    btn.setAttribute("aria-pressed", !!t);
+    btn.title = t ? "Change the date or remove the tick" : "Mark as sent (today)";
+  }
+  // The date panel under a ticked climb's buttons: change the day, or remove the tick.
+  function renderTickPanel(el) {
+    const pid = +el.dataset.pid, t = tickedOn(pid);
+    if (!t) { el.hidden = true; el.innerHTML = ""; return; }
+    el.innerHTML = `<label class="tickdate"><span>${ICON.done}Sent on</span><input type="date" value="${isoDay(t)}" max="${isoDay(Date.now())}" required></label>
+      <button class="link" data-act="tick-today">Today</button><button class="link danger" data-act="untick">Remove tick</button>`;
+  }
+  function openTickPanel(pid, open) {
+    const el = $(`#detail .tickpanel[data-pid="${pid}"]`);
+    if (!el) return;
+    $$("#detail .inpick").forEach((x) => { x.hidden = true; x.innerHTML = ""; });
+    $$("#detail [data-act=addlist]").forEach((b) => b.setAttribute("aria-expanded", "false"));
+    $$("#detail .tickpanel").forEach((x) => { if (x !== el) { x.hidden = true; x.innerHTML = ""; } });
+    el.hidden = !open;
+    if (open) renderTickPanel(el);
+    else el.innerHTML = "";
   }
   function paintSave(btn, pid) {
     const on = saved.has(pid);
@@ -863,7 +911,7 @@
     const nP = filteredProblems(), nB = filteredBoulders();
     $("#n-problems").textContent = nP.length.toLocaleString();
     $("#n-boulders").textContent = nB.length.toLocaleString();
-    $("#n-lists").textContent = lists.size + 1;
+    $("#n-lists").textContent = userListIds().length + 2;
     $("#filters").hidden = state.tab === "lists";
     if (state.tab === "problems") {
       nP.sort(problemSorts()[sort]);
@@ -886,7 +934,7 @@
       highlight();
       return;
     } else {
-      const ids = [LIST_SAVED, ...[...lists.keys()].sort((a, b) => (lists.get(b).updated || 0) - (lists.get(a).updated || 0))];
+      const ids = [LIST_SAVED, LIST_TICKS, ...userListIds().sort((a, b) => (lists.get(b).updated || 0) - (lists.get(a).updated || 0))];
       html = `<li class="lhead"><div><b>Your lists</b><span class="muted">Open a list to see its boulders on the map.</span></div><button class="pill" data-act="new-list">${ICON.plus}<span>New list</span></button></li>` +
         ids.map((id) => {
           const pids = listPids(id);
@@ -897,8 +945,8 @@
           const meta = pids.length
             ? `${plural(pids.length, "climb")} on ${plural(nB, "boulder")}${areas.length ? ` · ${esc(areas.slice(0, 2).join(", "))}${areas.length > 2 ? "…" : ""}` : ""}${away ? ` · +${away} elsewhere` : ""}`
             : away ? `${plural(away, "climb")} in other regions`
-            : id === LIST_SAVED ? "Tap Save on any problem to add it here" : "Empty: add climbs from any problem";
-          return `<li><button class="item" data-go="list/${id}"><span class="licon${id === LIST_SAVED ? " saved" : ""}">${id === LIST_SAVED ? ICON.saved : ICON.list}</span><span class="main"><span class="name">${esc(listName(id))}${allDl ? `<span class="mark dl" title="Downloaded">${ICON.done}</span>` : ""}</span><span class="meta">${meta}</span></span><span class="chev" aria-hidden="true">›</span></button></li>`;
+            : id === LIST_SAVED ? "Tap Save on any problem to add it here" : id === LIST_TICKS ? "Tap Tick on a climb when you send it" : "Empty: add climbs from any problem";
+          return `<li><button class="item" data-go="list/${id}"><span class="licon${id === LIST_SAVED ? " saved" : id === LIST_TICKS ? " ticks" : ""}">${id === LIST_SAVED ? ICON.saved : id === LIST_TICKS ? ICON.done : ICON.list}</span><span class="main"><span class="name">${esc(listName(id))}${allDl ? `<span class="mark dl" title="Downloaded">${ICON.done}</span>` : ""}</span><span class="meta">${meta}</span></span><span class="chev" aria-hidden="true">›</span></button></li>`;
         }).join("") +
         `<li class="savedhead"><div class="sync">${state.user ? `Your lists sync to ${esc(state.user.email || state.user.name)}.` : window.AtlasAuth ? `<button class="link" data-act="signin">Sign in with Google</button> to keep your lists on every device.` : "Lists are kept on this device."} Sharing a list creates a link anyone can open, no account needed.</div></li>`;
     }
@@ -1027,11 +1075,13 @@
               </button>
               <div class="more"><div class="more-in">
                 <div class="acts">
+                  <button class="pill tick" data-act="tick" data-pid="${p.id}"></button>
                   <button class="pill" data-act="save" data-pid="${p.id}"></button>
                   <button class="pill" data-act="addlist" data-pid="${p.id}"></button>
                   <button class="pill" data-act="dl" data-pid="${p.id}"></button>
                   ${navigator.share ? `<button class="pill" data-act="share" data-pid="${p.id}">${ICON.share}<span>Share</span></button>` : ""}
                 </div>
+                <div class="tickpanel" data-pid="${p.id}" hidden></div>
                 <div class="inpick" data-pid="${p.id}" hidden></div>
                 ${p.where ? `<p><b>Where:</b> ${esc(p.where)}</p>` : ""}
                 ${p.fa ? `<p><b>FA:</b> ${esc(p.fa)}</p>` : ""}
@@ -1043,6 +1093,7 @@
         <p class="approach"><a href="${esc(b.url)}" target="_blank" rel="noopener">${esc(b.name)} on Mountain Project ↗</a> · <a href="https://maps.apple.com/?daddr=${b.lat},${b.lon}&dirflg=w" target="_blank" rel="noopener">Walk here (Apple)</a> · <a href="https://www.google.com/maps/dir/?api=1&destination=${b.lat},${b.lon}&travelmode=walking" target="_blank" rel="noopener">Google</a></p>
       </div>`;
     $$("#detail [data-act=save]").forEach((btn) => paintSave(btn, +btn.dataset.pid));
+    $$("#detail [data-act=tick]").forEach((btn) => paintTick(btn, +btn.dataset.pid));
     $$("#detail [data-act=dl]").forEach((btn) => paintDl(btn, +btn.dataset.pid));
     $$("#detail [data-act=addlist]").forEach((btn) => paintAddList(btn, +btn.dataset.pid));
     updateWhere();
@@ -1254,9 +1305,11 @@
     const v = state.listView;
     if (!v) return;
     const shared = !!v.shared;
-    const own = !shared && v.id !== LIST_SAVED;
+    const own = !shared && v.id !== LIST_SAVED && v.id !== LIST_TICKS;
+    const isTicks = v.id === LIST_TICKS;
     const name = shared ? v.shared.name : listName(v.id);
     const pids = currentListPids();
+    const hardest = isTicks ? pids.map((p) => P[p]).filter((p) => p.g != null).sort((a, b) => b.g - a.g)[0] : null;
     const groups = listOrder(pids);
     const nDl = pids.filter((p) => downloaded.has(p)).length;
     const areas = [...new Set(groups.map((g) => A[g.b.area]?.name).filter(Boolean))];
@@ -1267,7 +1320,7 @@
           <button class="back" data-act="lists-back" aria-label="Back to lists"><svg viewBox="0 0 24 24"><path d="m15 5-7 7 7 7" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>Lists</button>
           <h2>${esc(name)}</h2>
         </div>
-        <div class="dsub">${shared ? "Shared with you · " : ""}${pids.length || !awayN ? `${plural(pids.length, "climb")} on ${plural(groups.length, "boulder")}${areas.length ? ` · ${esc(areas.join(", "))}` : ""}${awayN ? ` · +${awayN} in other regions` : ""}` : `${plural(awayN, "climb")} in other regions`}</div>
+        <div class="dsub">${shared ? "Shared with you · " : ""}${pids.length || !awayN ? `${plural(pids.length, "climb")} on ${plural(groups.length, "boulder")}${areas.length ? ` · ${esc(areas.join(", "))}` : ""}${awayN ? ` · +${awayN} in other regions` : ""}${hardest ? ` · hardest ${esc(hardest.grade.split(" ")[0])}` : ""}` : `${plural(awayN, "climb")} in other regions`}</div>
         <div class="acts lacts">
           ${shared ? `<button class="pill solid" data-act="keep-shared">${ICON.plus}<span>Save to my lists</span></button>` : ""}
           ${groups.length ? `<button class="pill" data-act="map-list">${ICON.map}<span>Fit map</span></button>` : ""}
@@ -1280,8 +1333,8 @@
         ${groups.map((g, i) => `
           <li class="lb">
             <button class="lbh" data-go="b/${g.b.id}"><span class="pinno">${i + 1}</span><span class="main"><span class="name">${esc(g.b.name)}</span><span class="meta">${esc(A[g.b.area]?.name ?? "")}${g.b.sector && g.b.sector !== A[g.b.area]?.name ? ` · ${esc(g.b.sector)}` : ""}</span></span>${distCell(g.b)}</button>
-            <ul>${g.ps.map((p) => `<li><button class="lp" data-go="p/${p.id}">${gradeHTML(p)}<span class="main"><span class="name">${esc(p.name)}${safetyHTML(p)}${downloaded.has(p.id) ? `<span class="mark dl" title="Downloaded">${ICON.done}</span>` : ""}</span><span class="meta">${starsHTML(p.stars)}${votesHTML(p.votes)}${p.height_ft ? ` · ${p.height_ft} ft` : ""}${p.videos?.length ? ` · <span class="vids">${ICON.play}${p.videos.length}</span>` : ""}</span></span></button>${shared ? "" : `<button class="rm" data-act="rm-from-list" data-pid="${p.id}" aria-label="Remove ${esc(p.name)} from this list">×</button>`}</li>`).join("")}</ul>
-          </li>`).join("") || `<li class="empty">${v.id === LIST_SAVED ? "Nothing saved yet. Open any problem and tap <b>Save</b>." : "This list is empty. Open any problem and tap <b>Add to list</b>."}</li>`}
+            <ul>${g.ps.map((p) => `<li><button class="lp" data-go="p/${p.id}">${gradeHTML(p)}<span class="main"><span class="name">${esc(p.name)}${safetyHTML(p)}${downloaded.has(p.id) ? `<span class="mark dl" title="Downloaded">${ICON.done}</span>` : ""}</span><span class="meta">${starsHTML(p.stars)}${votesHTML(p.votes)}${p.height_ft ? ` · ${p.height_ft} ft` : ""}${p.videos?.length ? ` · <span class="vids">${ICON.play}${p.videos.length}</span>` : ""}${isTicks && tickedOn(p.id) ? ` · <span class="sent">${ICON.done}${esc(fmtDay(tickedOn(p.id)))}</span>` : ""}</span></span></button>${shared ? "" : `<button class="rm" data-act="rm-from-list" data-pid="${p.id}" aria-label="Remove ${esc(p.name)} from this list">×</button>`}</li>`).join("")}</ul>
+          </li>`).join("") || `<li class="empty">${v.id === LIST_SAVED ? "Nothing saved yet. Open any problem and tap <b>Save</b>." : isTicks ? "No ticks yet. Open a climb and tap <b>Tick</b> when you send it." : "This list is empty. Open any problem and tap <b>Add to list</b>."}</li>`}
       </ol>
       <div class="elsewhere" hidden></div>`;
     drawListPins(groups);
@@ -1378,7 +1431,7 @@
   // Add to list: a small panel that opens right under the climb's buttons (tap again to close).
   function renderInlinePicker(el) {
     const pid = +el.dataset.pid;
-    const ids = [LIST_SAVED, ...[...lists.keys()].sort((a, b) => listName(a).localeCompare(listName(b)))];
+    const ids = [LIST_SAVED, ...userListIds().sort((a, b) => listName(a).localeCompare(listName(b)))];
     el.innerHTML = `<ul class="pick">${ids.map((id) => `<li><label><input type="checkbox" data-list="${id}" ${inList(id, pid) ? "checked" : ""}><span>${id === LIST_SAVED ? ICON.saved : ICON.list}${esc(listName(id))}</span><span class="muted">${listPids(id).length}</span></label></li>`).join("")}</ul>
       <form class="newl"><input type="text" maxlength="60" placeholder="New list, e.g. Projects" autocomplete="off" enterkeyhint="done"><button class="pill solid" type="submit">${ICON.plus}<span>Create</span></button></form>`;
   }
@@ -1387,6 +1440,7 @@
     if (!el) return;
     const open = el.hidden;
     $$("#detail .inpick").forEach((x) => { x.hidden = true; x.innerHTML = ""; });
+    $$("#detail .tickpanel").forEach((x) => { x.hidden = true; x.innerHTML = ""; });
     $$("#detail [data-act=addlist]").forEach((b) => b.setAttribute("aria-expanded", "false"));
     if (open) {
       renderInlinePicker(el);
@@ -1422,7 +1476,7 @@
     const id = +idStr;
     if (kind === "p" && P[id]) openBoulder(P[id].boulder, id);
     else if ((kind === "b" || kind === "p") && B[id]) openBoulder(id, null);
-    else if (kind === "list" && (idStr === LIST_SAVED || lists.has(idStr))) openList({ id: idStr });
+    else if (kind === "list" && (idStr === LIST_SAVED || idStr === LIST_TICKS || lists.has(idStr))) openList({ id: idStr });
     else if (kind === "share" && parts.length >= 3) openShared(parts[1], parts[2]);
     else if ((kind === "p" || kind === "b") && id) openElsewhere([id], location.hash.slice(1));
     else {
@@ -1616,7 +1670,7 @@
       window.AtlasAuth?.signIn($("#gbtn"));
       return;
     }
-    m.innerHTML = `<p><b>${esc(state.user.name || "")}</b><br><span class="muted">${esc(state.user.email || "")}</span></p><p class="muted">${plural(saved.size, "saved climb")} and ${plural(lists.size, "list")}, synced across your devices.</p><button class="pill" data-act="signout">Sign out</button>`;
+    m.innerHTML = `<p><b>${esc(state.user.name || "")}</b><br><span class="muted">${esc(state.user.email || "")}</span></p><p class="muted">${plural(saved.size, "saved climb")}, ${plural(Object.keys(lists.get(LIST_TICKS)?.items || {}).length, "tick")} and ${plural(userListIds().length, "list")}, synced across your devices.</p><button class="pill" data-act="signout">Sign out</button>`;
   }
 
   // ------------------------------------------------------------------ wire up
@@ -1671,6 +1725,30 @@
       if (a === "back") return back();
       if (a === "locate") return startLocate(true);
       if (a === "addlist") return toggleInlinePicker(+act.dataset.pid);
+      if (a === "tick") {
+        // First tap: sent today (the date panel opens to change it). Later taps show/hide the panel.
+        const pid = +act.dataset.pid;
+        const panel = $(`#detail .tickpanel[data-pid="${pid}"]`);
+        if (!tickedOn(pid)) {
+          setTick(pid, todayMs());
+          openTickPanel(pid, true);
+          toast(`Ticked ${P[pid].name} · ${fmtDay(todayMs())}`);
+        } else openTickPanel(pid, panel.hidden);
+        return;
+      }
+      if (a === "untick") {
+        const pid = +act.closest(".tickpanel").dataset.pid;
+        setTick(pid, null);
+        openTickPanel(pid, false);
+        toast(`Removed the tick on ${P[pid].name}.`);
+        return;
+      }
+      if (a === "tick-today") {
+        const pid = +act.closest(".tickpanel").dataset.pid;
+        setTick(pid, todayMs());
+        renderTickPanel(act.closest(".tickpanel"));
+        return;
+      }
       if (a === "save") {
         const pid = +act.dataset.pid;
         setSaved(pid, !saved.has(pid));
@@ -1739,6 +1817,8 @@
     $("#detail").addEventListener("change", (e) => {
       const cb = e.target.closest(".inpick input[data-list]");
       if (cb) setInList(cb.dataset.list, +cb.closest(".inpick").dataset.pid, cb.checked);
+      const day = e.target.closest(".tickpanel input[type=date]");
+      if (day && day.value) setTick(+day.closest(".tickpanel").dataset.pid, dayMs(day.value > isoDay(Date.now()) ? isoDay(Date.now()) : day.value));
     });
     $("#detail").addEventListener("submit", (e) => {
       const panel = e.target.closest(".inpick");
